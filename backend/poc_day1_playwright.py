@@ -52,23 +52,14 @@ MOBILE_MODELS = [
     "SM-A165F", "SM-A165M", "24108PCE2I", "MZB0KE1IN",
 ]
 
-# Актуальные селекторы (Magritte UI, ноябрь 2025+). hh переименовал поля:
-# login input теперь applicant-login-input-email, password-кнопка с дефисом.
 SEL_LOGIN_INPUT_CANDIDATES = [
-    'input[data-qa="applicant-login-input-email"]',
-    'input[name="username"]',
-    'input[data-qa="login-input-username"]',  # старый
+    'input[data-qa="login-input-username"]',  
 ]
 SEL_EXPAND_PASSWORD_CANDIDATES = [
-    'button[data-qa="expand-login-by-password"]',
-    'button[data-qa="expand-login-by_password"]',  # старый (с underscore)
     'button:has-text("Войти с паролем")',
-    'button:has-text("Войти по паролю")',
 ]
 SEL_PASSWORD_INPUT_CANDIDATES = [
     'input[data-qa="login-input-password"]',
-    'input[name="password"]',
-    'input[type="password"]',
 ]
 SEL_CAPTCHA_IMAGE = 'img[data-qa="account-captcha-picture"]'
 

@@ -393,16 +393,6 @@ AIautoclicker/
 │   │   │   ├── limiter.py             # 150/day, 20/hour counter
 │   │   │   └── cron.py                # token refresh cron (14-day)
 │   │   │
-│   │   ├── notifications/             # опциональный TG push
-│   │   │   ├── __init__.py
-│   │   │   └── telegram.py            # aiogram 3.x polling bot
-│   │   │
-│   │   ├── captcha/
-│   │   │   ├── __init__.py
-│   │   │   ├── detector.py            # detect captcha in response
-│   │   │   ├── screenshot.py          # Playwright screenshot → Supabase Storage
-│   │   │   └── poller.py              # poll /me каждые 5с до solved
-│   │   │
 │   │   ├── ai/
 │   │   │   ├── __init__.py
 │   │   │   └── openai.py              # ← ai/base.py + ai/openai.py (ChatOpenAI)

@@ -66,12 +66,6 @@ AIautoclicker/
 │   │   │   ├── __init__.py
 │   │   │   └── telegram.py            # aiogram 3.x polling bot
 │   │   │
-│   │   ├── captcha/
-│   │   │   ├── __init__.py
-│   │   │   ├── detector.py            # detect captcha in response
-│   │   │   ├── screenshot.py          # Playwright screenshot → Supabase Storage
-│   │   │   └── poller.py              # poll /me каждые 5с до solved
-│   │   │
 │   │   ├── ai/
 │   │   │   ├── __init__.py
 │   │   │   └── openai.py              # ← ai/base.py + ai/openai.py (ChatOpenAI)
