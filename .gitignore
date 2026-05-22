@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Env vars
+.env
+.env.local
+
+
+# Sub Repos
+hh-applicant-tool/
+
