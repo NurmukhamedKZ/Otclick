@@ -1,15 +1,14 @@
-import os
 from supabase import Client, create_client
 
+from app.config import settings
 
-def _make_client(key_env: str) -> Client:
-    url = os.environ["SUPABASE_URL"]
-    key = os.environ[key_env]
-    return create_client(url, key)
+
+def _make_client(key: str) -> Client:
+    return create_client(settings.SUPABASE_URL, key)
 
 
 # Bypasses RLS — use for all data writes and sensitive reads (hh_credentials)
-service_client: Client = _make_client("SUPABASE_SERVICE_ROLE_KEY")
+service_client: Client = _make_client(settings.SUPABASE_SERVICE_ROLE_KEY)
 
 # Respects RLS — use for JWT validation only
-anon_client: Client = _make_client("SUPABASE_ANON_KEY")
+anon_client: Client = _make_client(settings.SUPABASE_ANON_KEY)
