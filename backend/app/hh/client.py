@@ -178,10 +178,16 @@ class OAuthClient(BaseClient):
         self, endpoint: str, params: dict[str, Any] | None = None, **kw: Any
     ) -> AccessToken:
         tok = self.post(endpoint, params, **kw)
+        access_token = tok.get("access_token")
+        refresh_token = tok.get("refresh_token")
+        if not access_token:
+            raise errors.BadResponse(f"Missing access_token in /token response: {tok}")
+        if not refresh_token:
+            raise errors.BadResponse(f"Missing refresh_token in /token response: {tok}")
         return {
-            "access_token": tok.get("access_token"),
-            "refresh_token": tok.get("refresh_token"),
-            "access_expires_at": int(time.time()) + tok.pop("expires_in", 0),
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "access_expires_at": int(time.time()) + tok.get("expires_in", 0),
         }
 
     def authenticate(self, code: str) -> AccessToken:

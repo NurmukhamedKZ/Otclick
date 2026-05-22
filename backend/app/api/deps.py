@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -10,8 +12,10 @@ async def get_current_user(
     creds: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> str:
     """Validate Supabase JWT → return user_id (uuid string)."""
+    loop = asyncio.get_running_loop()
     try:
-        res = anon_client.auth.get_user(creds.credentials)
+        # anon_client is a sync Supabase client — run in executor to avoid blocking event loop
+        res = await loop.run_in_executor(None, anon_client.auth.get_user, creds.credentials)
     except Exception as ex:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 JobStatus = Literal["running", "captcha_required", "success", "failed"]
 
+CAPTCHA_TIMEOUT_SECONDS = 300.0
+
 
 @dataclass
 class JobState:
@@ -61,28 +63,55 @@ async def solve_captcha(job_id: str, solution: str) -> None:
 
 async def _run_oauth(job_id: str, username: str, password: str) -> None:
     state = _jobs[job_id]
+    loop = asyncio.get_running_loop()
     try:
         async def on_captcha(screenshot_png: bytes) -> str:
             state.status = "captcha_required"
             path = f"{state.user_id}/{job_id}.png"
-            service_client.storage.from_("captcha-screenshots").upload(
-                path, screenshot_png,
-                {"content-type": "image/png", "upsert": "true"},
+
+            # Sync Supabase storage calls — run in executor to avoid blocking event loop
+            await loop.run_in_executor(
+                None,
+                lambda: service_client.storage.from_("captcha-screenshots").upload(
+                    path, screenshot_png,
+                    {"content-type": "image/png", "upsert": "true"},
+                ),
             )
-            signed = service_client.storage.from_(
-                "captcha-screenshots"
-            ).create_signed_url(path, 600)
-            state.screenshot_url = signed.get("signedURL") or signed.get("signedUrl")
-            solution = await state.captcha_queue.get()
+            signed = await loop.run_in_executor(
+                None,
+                lambda: service_client.storage.from_("captcha-screenshots")
+                    .create_signed_url(path, 600),
+            )
+            url = signed.get("signedURL") or signed.get("signedUrl")
+            if not url:
+                raise RuntimeError("Captcha screenshot URL unavailable (storage error)")
+            state.screenshot_url = url
+
+            try:
+                solution = await asyncio.wait_for(
+                    state.captcha_queue.get(), timeout=CAPTCHA_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                raise RuntimeError(
+                    f"Captcha not solved within {int(CAPTCHA_TIMEOUT_SECONDS // 60)} minutes"
+                )
             state.status = "running"
             return solution
 
         code = await get_auth_code(username, password, on_captcha=on_captcha)
-        token = _exchange_and_fetch_user(code)
-        _persist_credentials(state.user_id, token["access_token"],
-                             token["refresh_token"],
-                             token["access_expires_at"],
-                             token["hh_user_id"])
+
+        # Sync blocking HTTP calls (requests + time.sleep) — run in executor
+        token = await loop.run_in_executor(None, _exchange_and_fetch_user, code)
+
+        await loop.run_in_executor(
+            None,
+            _persist_credentials,
+            state.user_id,
+            token["access_token"],
+            token["refresh_token"],
+            token["access_expires_at"],
+            token["hh_user_id"],
+        )
         state.status = "success"
     except Exception as ex:
         logger.exception("hh oauth job %s failed", job_id)
