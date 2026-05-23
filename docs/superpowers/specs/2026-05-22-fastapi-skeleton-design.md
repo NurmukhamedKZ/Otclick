@@ -32,7 +32,7 @@ backend/
 │   │   ├── client_keys.py   # ANDROID_CLIENT_ID / SECRET
 │   │   ├── user_agent.py    # mobile UA rotation
 │   │   ├── datatypes.py     # AccessToken TypedDict
-│   │   └── authorize.py     # Playwright OAuth flow (adapted from poc_day1_playwright.py)
+│   │   └── authorize.py     # Playwright OAuth flow — adapted from poc_day1_playwright.py (NOT from hh-applicant-tool/authorize.py which has stale selectors)
 │   │
 │   ├── schemas/
 │   │   ├── __init__.py
@@ -89,7 +89,8 @@ playwright_oauth_task(user_id, username, password, job_id):
       → goto hh OAuth authorize URL
       → fill username → click "Войти с паролем" → fill password → Enter
       → intercept hhandroid://oauthresponse?code=...
-  → hh/client.py OAuthClient.authenticate(code) → {access_token, refresh_token, expires_at}
+  → hh/client.py OAuthClient.authenticate(code) → {access_token, refresh_token, access_expires_at: int (Unix ts)}
+      → datetime.utcfromtimestamp(access_expires_at) → ISO string for Supabase
   → hh/client.py ApiClient.get("/me") → hh_user_id
   → Fernet.encrypt(access_token), Fernet.encrypt(refresh_token)
   → service_client.table("hh_credentials").upsert({...})
