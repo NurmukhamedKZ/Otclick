@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_ROLE_KEY: str
     FERNET_KEY: str
     CORS_ORIGINS: str = "http://localhost:3000"
+    DEBUG_ENDPOINTS: bool = False
+    LOG_LEVEL: str = "INFO"
 
     @property
     def cors_origins_list(self) -> list[str]:

@@ -3,6 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import SignOutButton from "./sign-out-button";
 import HHStatusBanner from "./hh-status-banner";
 import ResumesCard from "./resumes-card";
+import WorkerCard from "./worker-card";
+import NotificationsCard from "./notifications-card";
+import DebugCard from "./debug-card";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -30,10 +33,9 @@ export default async function DashboardPage() {
 
       <HHStatusBanner />
       <ResumesCard />
-
-      <section className="rounded border border-gray-200 bg-white p-4 text-sm text-gray-500">
-        Отклики, статистика — появятся когда worker запустим.
-      </section>
+      <WorkerCard />
+      <NotificationsCard />
+      <DebugCard />
     </main>
   );
 }

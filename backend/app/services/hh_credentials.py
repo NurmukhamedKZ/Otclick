@@ -16,10 +16,22 @@ from app.services.hh_auth import decrypt_token, encrypt_token
 logger = logging.getLogger(__name__)
 
 
+class HHCredentialsInvalid(Exception):
+    """Stored hh credentials marked invalid (token dead, banned, etc.)."""
+
+    def __init__(self, user_id: str, reason: str | None) -> None:
+        super().__init__(f"hh credentials invalid for {user_id}: {reason}")
+        self.user_id = user_id
+        self.reason = reason
+
+
 def _load_row(user_id: str) -> dict:
     res = (
         service_client.table("hh_credentials")
-        .select("access_token_encrypted,refresh_token_encrypted,expires_at")
+        .select(
+            "access_token_encrypted,refresh_token_encrypted,expires_at,"
+            "invalid_at,invalid_reason"
+        )
         .eq("user_id", user_id)
         .maybe_single()
         .execute()
@@ -30,7 +42,23 @@ def _load_row(user_id: str) -> dict:
             status_code=status.HTTP_409_CONFLICT,
             detail="hh account not connected",
         )
+    if data.get("invalid_at"):
+        raise HHCredentialsInvalid(user_id, data.get("invalid_reason"))
     return data
+
+
+def _mark_invalid_sync(user_id: str, reason: str) -> None:
+    service_client.table("hh_credentials").update(
+        {
+            "invalid_at": datetime.now(timezone.utc).isoformat(),
+            "invalid_reason": reason,
+        }
+    ).eq("user_id", user_id).execute()
+
+
+async def mark_invalid(user_id: str, reason: str) -> None:
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _mark_invalid_sync, user_id, reason)
 
 
 def _build_client(row: dict) -> ApiClient:

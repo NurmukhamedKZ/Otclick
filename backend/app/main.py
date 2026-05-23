@@ -1,9 +1,19 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.config import settings
 from app.db.supabase import service_client
+
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+# Quiet down noisy libs even at DEBUG level.
+for noisy in ("httpx", "httpcore", "hpack", "urllib3", "supabase"):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
 
 app = FastAPI(title="AIautoclicker API", version="0.1.0")
 

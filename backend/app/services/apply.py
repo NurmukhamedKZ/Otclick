@@ -12,11 +12,24 @@ from typing import Literal
 
 from app.db.supabase import service_client
 from app.hh import errors as hh_errors
-from app.services.hh_credentials import load_api_client, persist_if_refreshed
+from app.services.hh_credentials import (
+    HHCredentialsInvalid,
+    load_api_client,
+    mark_invalid,
+    persist_if_refreshed,
+)
 
 logger = logging.getLogger(__name__)
 
-ApplyStatus = Literal["sent", "failed", "captcha", "skipped"]
+ApplyStatus = Literal[
+    "sent",
+    "failed",
+    "captcha",
+    "skipped",
+    "limit_day",
+    "token_dead",
+    "resume_missing",
+]
 
 STATIC_COVER_LETTER = (
     "Здравствуйте! Меня заинтересовала ваша вакансия, "
@@ -123,19 +136,29 @@ async def apply_one(
 ) -> ApplyStatus:
     """Send a single application. Returns final status."""
     loop = asyncio.get_running_loop()
+    logger.info(
+        "apply: user=%s resume=%s vacancy=%s — start",
+        user_id, resume_uuid, vacancy_id,
+    )
 
     resolved = await loop.run_in_executor(
         None, _resolve_hh_resume_id, user_id, resume_uuid
     )
     if resolved is None:
-        logger.warning("resume %s not found for user %s", resume_uuid, user_id)
-        return "skipped"
+        logger.warning("apply: resume %s not found for user %s", resume_uuid, user_id)
+        return "resume_missing"
     hh_resume_id, resume_uuid = resolved
+    logger.debug("apply: hh_resume_id=%s", hh_resume_id)
 
     if await loop.run_in_executor(None, _already_applied, user_id, vacancy_id):
+        logger.info("apply: user=%s already applied to vacancy=%s", user_id, vacancy_id)
         return "skipped"
 
-    client = await load_api_client(user_id)
+    try:
+        client = await load_api_client(user_id)
+    except HHCredentialsInvalid:
+        logger.error("apply: user=%s creds invalid", user_id)
+        return "token_dead"
     original_access = client.access_token
     cover_letter = STATIC_COVER_LETTER
     employer_id: str | None = None
@@ -146,6 +169,10 @@ async def apply_one(
             "vacancy_id": vacancy_id,
             "message": cover_letter,
         }
+        logger.info(
+            "apply: POST /negotiations user=%s vacancy=%s resume=%s",
+            user_id, vacancy_id, hh_resume_id,
+        )
         try:
             await loop.run_in_executor(
                 None, lambda: client.post("/negotiations", params)
@@ -163,6 +190,13 @@ async def apply_one(
                 ),
             )
             return "captcha"
+        except hh_errors.LimitExceeded:
+            logger.info("user %s: hh LimitExceeded on vacancy %s", user_id, vacancy_id)
+            return "limit_day"
+        except hh_errors.Forbidden as ex:
+            logger.warning("user %s: hh Forbidden — marking creds invalid", user_id)
+            await mark_invalid(user_id, f"Forbidden: {ex}")
+            return "token_dead"
         except hh_errors.ClientError as ex:
             if _is_already_applied_error(ex):
                 employer_id = await loop.run_in_executor(
@@ -199,6 +233,10 @@ async def apply_one(
 
         employer_id = await loop.run_in_executor(
             None, _fetch_employer_id, vacancy_id, client
+        )
+        logger.info(
+            "apply: SENT user=%s vacancy=%s employer=%s",
+            user_id, vacancy_id, employer_id,
         )
         await loop.run_in_executor(
             None,

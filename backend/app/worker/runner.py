@@ -18,6 +18,7 @@ import requests as _requests
 
 from app.hh import errors as hh_errors
 from app.services import apply as apply_service
+from app.services.notifications import notify
 from app.worker import limiter, throttle
 from app.worker.queue import ApplyJob, drop_user_queue, get_user_queue
 
@@ -29,7 +30,7 @@ State = Literal["running", "paused_captcha", "paused_limit", "stopped"]
 HOUR_COOLDOWN_S = 60 * 60 + 30
 
 # Sleep when producer found 0 jobs and we're idle.
-IDLE_REFILL_SLEEP_S = 10 * 60
+IDLE_REFILL_SLEEP_S = 10
 
 
 @dataclass
@@ -91,8 +92,13 @@ async def _run_loop(handle: RunnerHandle) -> None:
     user_id = handle.user_id
     queue = get_user_queue(user_id)
     rng = random.Random()
+    logger.info("runner: user=%s loop START", user_id)
 
     while True:
+        logger.debug(
+            "runner: user=%s tick state=%s queue=%d today=%d",
+            user_id, handle.state, queue.qsize(), handle.today_count,
+        )
         # Captcha pause — wait until external resume sets event.
         if handle.state == "paused_captcha":
             handle.next_run_at = None
@@ -108,6 +114,9 @@ async def _run_loop(handle: RunnerHandle) -> None:
                 None, _seconds_until_next_local_midnight, user_id
             )
             handle.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=sleep_s)
+            await notify(
+                user_id, "limit_reached", {"source": "local_day", "sleep_s": int(sleep_s)}
+            )
             logger.info("user %s: daily limit, sleeping %.0fs", user_id, sleep_s)
             await asyncio.sleep(sleep_s)
             handle.state = "running"
@@ -150,23 +159,66 @@ async def _run_loop(handle: RunnerHandle) -> None:
         try:
             job = await asyncio.wait_for(queue.get(), timeout=30.0)
         except asyncio.TimeoutError:
+            logger.debug("runner: user=%s queue.get() timeout — re-loop", user_id)
             continue
 
         # Throttle pre-apply.
         delay = throttle.next_delay(rng)
         handle.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+        logger.info(
+            "runner: user=%s applying vacancy=%s (resume=%s) after %.1fs delay",
+            user_id, job.vacancy_id, job.resume_id, delay,
+        )
         await asyncio.sleep(delay)
 
         status = await _maybe_apply_with_retry(job)
+        logger.info(
+            "runner: user=%s vacancy=%s status=%s", user_id, job.vacancy_id, status
+        )
 
         if status == "sent":
             handle.today_count = await limiter.increment(user_id)
             handle.cluster.record_apply()
+            await notify(
+                user_id,
+                "apply_success",
+                {"vacancy_id": job.vacancy_id, "today_count": handle.today_count},
+            )
         elif status == "captcha":
             handle.state = "paused_captcha"
             handle.captcha_event.clear()
             handle.last_error = f"captcha on vacancy {job.vacancy_id}"
             logger.warning("user %s: captcha — pausing", user_id)
+            await notify(user_id, "captcha", {"vacancy_id": job.vacancy_id})
+        elif status == "limit_day":
+            # hh told us we're done for the day — bump local to cap, then pause.
+            handle.state = "paused_limit"
+            sleep_s = await asyncio.get_running_loop().run_in_executor(
+                None, _seconds_until_next_local_midnight, user_id
+            )
+            handle.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=sleep_s)
+            await notify(
+                user_id, "limit_reached", {"source": "hh", "sleep_s": int(sleep_s)}
+            )
+            logger.info(
+                "user %s: hh LimitExceeded, sleeping %.0fs", user_id, sleep_s
+            )
+            await asyncio.sleep(sleep_s)
+            handle.state = "running"
+        elif status == "token_dead":
+            handle.state = "stopped"
+            handle.last_error = "hh token dead — reconnect required"
+            await notify(user_id, "token_dead", {"vacancy_id": job.vacancy_id})
+            await notify(user_id, "worker_stop", {"reason": "token_dead"})
+            logger.error("user %s: token dead — stopping runner", user_id)
+            return
+        elif status == "resume_missing":
+            handle.last_error = f"resume {job.resume_id} missing"
+            await notify(
+                user_id,
+                "resume_missing",
+                {"resume_id": job.resume_id, "vacancy_id": job.vacancy_id},
+            )
         elif status == "failed":
             handle.last_error = f"failed on vacancy {job.vacancy_id}"
 
@@ -180,11 +232,25 @@ class WorkerRegistry:
         async with self._lock:
             existing = self._handles.get(user_id)
             if existing and existing.task and not existing.task.done():
+                logger.info("registry: user=%s already running — returning existing", user_id)
                 return existing
+            logger.info("registry: spawning runner for user=%s", user_id)
             handle = RunnerHandle(user_id=user_id)
             handle.task = asyncio.create_task(
                 _run_loop(handle), name=f"worker:{user_id}"
             )
+
+            def _on_done(t: asyncio.Task, uid: str = user_id) -> None:
+                if t.cancelled():
+                    logger.info("runner: user=%s task cancelled", uid)
+                    return
+                exc = t.exception()
+                if exc is not None:
+                    logger.error("runner: user=%s task crashed: %r", uid, exc, exc_info=exc)
+                else:
+                    logger.info("runner: user=%s task ended cleanly", uid)
+
+            handle.task.add_done_callback(_on_done)
             self._handles[user_id] = handle
             return handle
 

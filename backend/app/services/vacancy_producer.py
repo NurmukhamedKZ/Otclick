@@ -72,11 +72,23 @@ def _matches_excluded(item: dict, pat: re.Pattern | None) -> bool:
 async def produce_jobs(user_id: str) -> int:
     """Refill user queue from enabled filters. Returns number of jobs pushed."""
     loop = asyncio.get_running_loop()
+    logger.info("producer: starting for user=%s", user_id)
     filters = await loop.run_in_executor(None, _load_enabled_filters, user_id)
+    logger.info(
+        "producer: user=%s found %d enabled filter(s) with resume_id", user_id, len(filters)
+    )
     if not filters:
+        logger.warning(
+            "producer: user=%s — NO enabled filter has resume_id. Создай фильтр и привяжи резюме.",
+            user_id,
+        )
         return 0
 
-    client = await load_api_client(user_id)
+    try:
+        client = await load_api_client(user_id)
+    except Exception:
+        logger.exception("producer: user=%s — failed to load hh ApiClient", user_id)
+        return 0
     original_access = client.access_token
     queue = get_user_queue(user_id)
     pushed = 0
@@ -88,6 +100,12 @@ async def produce_jobs(user_id: str) -> int:
             params = _filter_to_search_params(f)
             params["per_page"] = PER_PAGE
             params["page"] = 0
+            logger.info(
+                "producer: user=%s filter=%s search params=%s",
+                user_id,
+                f.get("id"),
+                params,
+            )
             try:
                 payload = await loop.run_in_executor(
                     None, lambda p=params: client.get("vacancies", p)
@@ -97,6 +115,14 @@ async def produce_jobs(user_id: str) -> int:
                 continue
 
             items = payload.get("items", []) if isinstance(payload, dict) else []
+            found_total = payload.get("found") if isinstance(payload, dict) else None
+            logger.info(
+                "producer: user=%s filter=%s hh returned items=%d found=%s",
+                user_id,
+                f.get("id"),
+                len(items),
+                found_total,
+            )
             if not items:
                 continue
 
@@ -119,17 +145,30 @@ async def produce_jobs(user_id: str) -> int:
             blacklisted = await loop.run_in_executor(
                 None, _blacklisted_employer_ids, user_id, employer_ids
             )
+            logger.info(
+                "producer: user=%s filter=%s already_applied=%d blacklisted=%d",
+                user_id,
+                f.get("id"),
+                len(already),
+                len(blacklisted),
+            )
 
+            skipped_already = 0
+            skipped_blacklist = 0
+            skipped_excluded = 0
             for it in items:
                 if pushed >= MAX_PUSH_PER_RUN:
                     break
                 vid = str(it.get("id") or "")
                 if not vid or vid in already:
+                    skipped_already += 1
                     continue
                 emp_id = (it.get("employer") or {}).get("id")
                 if emp_id and str(emp_id) in blacklisted:
+                    skipped_blacklist += 1
                     continue
                 if _matches_excluded(it, excluded_pat):
+                    skipped_excluded += 1
                     continue
                 await queue.put(
                     ApplyJob(
@@ -140,8 +179,17 @@ async def produce_jobs(user_id: str) -> int:
                     )
                 )
                 pushed += 1
+            logger.info(
+                "producer: user=%s filter=%s skipped already=%d blacklist=%d excluded=%d",
+                user_id,
+                f.get("id"),
+                skipped_already,
+                skipped_blacklist,
+                skipped_excluded,
+            )
     finally:
         await persist_if_refreshed(user_id, client, original_access)
 
-    logger.info("producer: user=%s pushed=%d", user_id, pushed)
+    logger.info("producer: user=%s DONE pushed=%d total queue size=%d",
+                user_id, pushed, queue.qsize())
     return pushed

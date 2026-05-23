@@ -1,0 +1,139 @@
+import os
+from unittest.mock import AsyncMock, patch
+
+os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service")
+os.environ.setdefault("FERNET_KEY", "kPpDeJjFqDppkMm6QHzqFkkSgFwsKtGzh4WeZ5dKZHc=")
+
+
+async def test_retry_once_on_transient_then_success():
+    import requests as req
+
+    from app.worker import runner
+    from app.worker.queue import ApplyJob
+
+    calls = []
+
+    async def fake_apply_one(user_id, resume_id, vacancy_id):
+        calls.append(vacancy_id)
+        if len(calls) == 1:
+            raise req.ConnectionError("boom")
+        return "sent"
+
+    with patch.object(runner.apply_service, "apply_one", side_effect=fake_apply_one):
+        job = ApplyJob(user_id="u1", resume_id="r1", vacancy_id="v1", filter_id=None)
+        status = await runner._maybe_apply_with_retry(job)
+
+    assert status == "sent"
+    assert len(calls) == 2
+
+
+async def test_no_retry_on_fatal():
+    from app.hh import errors as hh_errors
+    from app.worker import runner
+    from app.worker.queue import ApplyJob
+
+    calls = []
+
+    async def fake_apply_one(user_id, resume_id, vacancy_id):
+        calls.append(vacancy_id)
+        resp = type("R", (), {"status_code": 400, "request": None, "headers": {}})()
+        raise hh_errors.BadRequest(resp, {"description": "nope"})
+
+    with patch.object(runner.apply_service, "apply_one", side_effect=fake_apply_one):
+        job = ApplyJob(user_id="u1", resume_id="r1", vacancy_id="v1", filter_id=None)
+        status = await runner._maybe_apply_with_retry(job)
+
+    assert status == "failed"
+    assert len(calls) == 1
+
+
+async def test_retry_once_then_give_up():
+    import requests as req
+
+    from app.worker import runner
+    from app.worker.queue import ApplyJob
+
+    calls = []
+
+    async def fake_apply_one(user_id, resume_id, vacancy_id):
+        calls.append(vacancy_id)
+        raise req.Timeout("slow")
+
+    with patch.object(runner.apply_service, "apply_one", side_effect=fake_apply_one):
+        job = ApplyJob(user_id="u1", resume_id="r1", vacancy_id="v1", filter_id=None)
+        status = await runner._maybe_apply_with_retry(job)
+
+    assert status == "failed"
+    assert len(calls) == 2
+
+
+async def test_is_transient_classification():
+    import requests as req
+
+    from app.hh import errors as hh_errors
+    from app.worker import runner
+
+    resp = type("R", (), {"status_code": 500, "request": None, "headers": {}})()
+    assert runner._is_transient(hh_errors.InternalServerError(resp, {})) is True
+    assert runner._is_transient(hh_errors.BadGateway(resp, {})) is True
+    assert runner._is_transient(req.ConnectionError("x")) is True
+    assert runner._is_transient(req.Timeout("x")) is True
+
+    resp4 = type("R", (), {"status_code": 400, "request": None, "headers": {}})()
+    assert runner._is_transient(hh_errors.BadRequest(resp4, {"description": "x"})) is False
+    assert runner._is_transient(ValueError("nope")) is False
+
+
+async def test_registry_start_stop_lifecycle():
+    from app.worker import runner
+
+    runner.reset_registry()
+    registry = runner.get_registry()
+
+    # Patch _run_loop to a no-op coroutine that waits to be cancelled.
+    import asyncio
+
+    async def idle_loop(handle):
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            raise
+
+    with patch.object(runner, "_run_loop", side_effect=idle_loop):
+        handle = await registry.start("u1")
+        assert handle.task is not None
+        assert handle.state == "running"
+        # Idempotent: second start returns the same handle.
+        again = await registry.start("u1")
+        assert again is handle
+
+        stopped = await registry.stop("u1")
+        assert stopped is True
+        assert registry.get("u1") is None
+
+
+async def test_registry_resume_captcha():
+    from app.worker import runner
+
+    runner.reset_registry()
+    registry = runner.get_registry()
+
+    import asyncio
+
+    async def idle_loop(handle):
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            raise
+
+    with patch.object(runner, "_run_loop", side_effect=idle_loop):
+        handle = await registry.start("u2")
+        handle.state = "paused_captcha"
+        assert registry.resume_captcha("u2") is True
+        assert handle.captcha_event.is_set()
+        # Wrong state returns False.
+        handle.state = "running"
+        assert registry.resume_captcha("u2") is False
+        await registry.stop("u2")

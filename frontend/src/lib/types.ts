@@ -48,3 +48,29 @@ export type FilterPreview = {
   found: number;
   items: VacancyPreviewItem[];
 };
+
+export type WorkerStatus = {
+  state: "running" | "paused_captcha" | "paused_limit" | "stopped";
+  today_count: number;
+  daily_limit: number;
+  queued: number;
+  next_run_at: string | null;
+  last_error: string | null;
+};
+
+export type WorkerStartResponse = {
+  state: string;
+  queued: number;
+};
+
+export type WorkerStopResponse = {
+  stopped: boolean;
+};
+
+export type NotificationRow = {
+  id: string;
+  type: string;
+  payload: Record<string, unknown> | null;
+  read: boolean;
+  created_at: string;
+};
