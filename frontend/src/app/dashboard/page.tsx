@@ -1,32 +1,39 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import SignOutButton from "./sign-out-button";
+import HHStatusBanner from "./hh-status-banner";
+import ResumesCard from "./resumes-card";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-16">
-      <h1 className="text-2xl font-bold mb-4">Dashboard</h1>
-      <p className="mb-6 text-gray-700">Вошёл как: {user?.email ?? user?.id}</p>
-      <p className="mb-8 text-sm text-gray-500">
-        TODO: connect hh, filters, applications.
-      </p>
-      <SignOutButton />
+    <main className="mx-auto max-w-3xl px-6 py-12">
+      <header className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <p className="text-sm text-gray-600">{user?.email ?? user?.id}</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/filters"
+            className="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+          >
+            Фильтры
+          </Link>
+          <SignOutButton />
+        </div>
+      </header>
 
-      <details className="mt-8">
-        <summary className="cursor-pointer text-sm text-gray-500">
-          debug: access token
-        </summary>
-        <pre className="mt-2 p-3 bg-gray-100 text-xs break-all whitespace-pre-wrap rounded">
-          {session?.access_token}
-        </pre>
-      </details>
+      <HHStatusBanner />
+      <ResumesCard />
+
+      <section className="rounded border border-gray-200 bg-white p-4 text-sm text-gray-500">
+        Отклики, статистика — появятся когда worker запустим.
+      </section>
     </main>
   );
 }
