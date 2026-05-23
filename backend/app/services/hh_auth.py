@@ -98,7 +98,7 @@ async def _run_oauth(job_id: str, username: str, password: str) -> None:
             state.status = "running"
             return solution
 
-        code = await get_auth_code(username, password, on_captcha=on_captcha)
+        code = await get_auth_code(username, password, on_captcha=on_captcha, headless=False)
 
         # Sync blocking HTTP calls (requests + time.sleep) — run in executor
         token = await loop.run_in_executor(None, _exchange_and_fetch_user, code)

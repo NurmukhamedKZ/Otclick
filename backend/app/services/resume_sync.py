@@ -34,6 +34,15 @@ def _upsert_resumes(user_id: str, items: list[dict]) -> list[dict]:
         for item in items
         if item.get("id")
     ]
+    seen_ids = [r["hh_resume_id"] for r in rows]
+
+    # Delete resumes that disappeared from hh (user deleted them remotely).
+    # Use NOT IN; empty list ⇒ wipe all rows for this user.
+    delete_q = service_client.table("resumes").delete().eq("user_id", user_id)
+    if seen_ids:
+        delete_q = delete_q.not_.in_("hh_resume_id", seen_ids)
+    delete_q.execute()
+
     if not rows:
         return []
     res = (

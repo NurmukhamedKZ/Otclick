@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -159,6 +160,27 @@ async def preview_filter(user_id: str, filter_id: str) -> dict:
     finally:
         await persist_if_refreshed(user_id, client, original_access)
     items = payload.get("items", []) if isinstance(payload, dict) else []
+    excluded_pat = None
+    if f.get("excluded_regex"):
+        try:
+            excluded_pat = re.compile(f["excluded_regex"], re.IGNORECASE)
+        except re.error as ex:
+            raise HTTPException(
+                status_code=400, detail=f"invalid excluded_regex: {ex}"
+            )
+
+    def _is_excluded(v: dict) -> bool:
+        if not excluded_pat:
+            return False
+        haystack = " ".join(filter(None, [
+            v.get("name") or "",
+            (v.get("employer") or {}).get("name") or "",
+            ((v.get("snippet") or {}).get("requirement") or ""),
+            ((v.get("snippet") or {}).get("responsibility") or ""),
+        ]))
+        return bool(excluded_pat.search(haystack))
+
+    kept = [v for v in items if not _is_excluded(v)]
     return {
         "found": payload.get("found", 0) if isinstance(payload, dict) else 0,
         "items": [
@@ -170,6 +192,6 @@ async def preview_filter(user_id: str, filter_id: str) -> dict:
                 "salary": v.get("salary"),
                 "url": v.get("alternate_url"),
             }
-            for v in items
+            for v in kept
         ],
     }

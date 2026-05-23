@@ -35,10 +35,12 @@ def _load_row(user_id: str) -> dict:
 
 def _build_client(row: dict) -> ApiClient:
     expires_at = row.get("expires_at")
+    expires_ts = 0
     if isinstance(expires_at, str):
-        expires_ts = int(datetime.fromisoformat(expires_at).timestamp())
-    else:
-        expires_ts = 0
+        dt = datetime.fromisoformat(expires_at)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        expires_ts = int(dt.timestamp())
     return ApiClient(
         user_agent=generate_android_useragent(),
         access_token=decrypt_token(row["access_token_encrypted"]),
