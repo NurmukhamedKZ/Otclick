@@ -112,6 +112,10 @@ export default function WorkerCard() {
           </dd>
           <dt>В очереди</dt>
           <dd>{status.queued}</dd>
+          <dt>Пропущено (тест)</dt>
+          <dd title="Вакансии с тестом от работодателя — отклик невозможен без прохождения теста">
+            {status.skipped_has_test}
+          </dd>
           <dt>Next run</dt>
           <dd>{status.next_run_at ? new Date(status.next_run_at).toLocaleTimeString() : "—"}</dd>
           {status.last_error && (

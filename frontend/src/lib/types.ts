@@ -56,6 +56,7 @@ export type WorkerStatus = {
   queued: number;
   next_run_at: string | null;
   last_error: string | null;
+  skipped_has_test: number;
 };
 
 export type WorkerStartResponse = {

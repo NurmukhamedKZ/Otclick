@@ -43,6 +43,7 @@ class RunnerHandle:
     captcha_event: asyncio.Event = field(default_factory=asyncio.Event)
     cluster: throttle.SessionCluster = field(default_factory=throttle.SessionCluster)
     last_error: str | None = None
+    skipped_has_test: int = 0
 
 
 def _is_transient(ex: BaseException) -> bool:
@@ -132,10 +133,11 @@ async def _run_loop(handle: RunnerHandle) -> None:
         # Refill queue when empty.
         if queue.empty():
             try:
-                pushed = await produce_jobs(user_id)
+                pushed, skipped_has_test = await produce_jobs(user_id)
             except Exception:
                 logger.exception("producer failed for %s", user_id)
-                pushed = 0
+                pushed, skipped_has_test = 0, 0
+            handle.skipped_has_test += skipped_has_test
             if pushed == 0:
                 handle.next_run_at = datetime.now(timezone.utc) + timedelta(
                     seconds=IDLE_REFILL_SLEEP_S
@@ -212,6 +214,8 @@ async def _run_loop(handle: RunnerHandle) -> None:
             await notify(user_id, "worker_stop", {"reason": "token_dead"})
             logger.error("user %s: token dead — stopping runner", user_id)
             return
+        elif status == "test_required":
+            handle.skipped_has_test += 1
         elif status == "resume_missing":
             handle.last_error = f"resume {job.resume_id} missing"
             await notify(

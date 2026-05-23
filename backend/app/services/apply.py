@@ -28,8 +28,15 @@ ApplyStatus = Literal[
     "skipped",
     "limit_day",
     "token_dead",
+    "test_required",
     "resume_missing",
 ]
+
+_TEST_REQUIRED_MARKERS = (
+    "must process test",
+    "process test first",
+    "тест",
+)
 
 STATIC_COVER_LETTER = (
     "Здравствуйте! Меня заинтересовала ваша вакансия, "
@@ -194,6 +201,24 @@ async def apply_one(
             logger.info("user %s: hh LimitExceeded on vacancy %s", user_id, vacancy_id)
             return "limit_day"
         except hh_errors.Forbidden as ex:
+            msg = str(ex).lower()
+            if any(m in msg for m in _TEST_REQUIRED_MARKERS):
+                logger.info(
+                    "apply: user=%s vacancy=%s requires test — skip",
+                    user_id, vacancy_id,
+                )
+                await loop.run_in_executor(
+                    None,
+                    lambda: _record_application(
+                        user_id=user_id,
+                        resume_uuid=resume_uuid,
+                        vacancy_id=vacancy_id,
+                        status="skipped",
+                        cover_letter=cover_letter,
+                        error=f"test_required: {ex}",
+                    ),
+                )
+                return "test_required"
             logger.warning("user %s: hh Forbidden — marking creds invalid", user_id)
             await mark_invalid(user_id, f"Forbidden: {ex}")
             return "token_dead"

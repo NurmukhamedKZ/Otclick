@@ -69,8 +69,11 @@ def _matches_excluded(item: dict, pat: re.Pattern | None) -> bool:
     return bool(pat.search(hay))
 
 
-async def produce_jobs(user_id: str) -> int:
-    """Refill user queue from enabled filters. Returns number of jobs pushed."""
+async def produce_jobs(user_id: str) -> tuple[int, int]:
+    """Refill user queue from enabled filters.
+
+    Returns (pushed, skipped_has_test_total) across all filters in this run.
+    """
     loop = asyncio.get_running_loop()
     logger.info("producer: starting for user=%s", user_id)
     filters = await loop.run_in_executor(None, _load_enabled_filters, user_id)
@@ -82,16 +85,17 @@ async def produce_jobs(user_id: str) -> int:
             "producer: user=%s — NO enabled filter has resume_id. Создай фильтр и привяжи резюме.",
             user_id,
         )
-        return 0
+        return 0, 0
 
     try:
         client = await load_api_client(user_id)
     except Exception:
         logger.exception("producer: user=%s — failed to load hh ApiClient", user_id)
-        return 0
+        return 0, 0
     original_access = client.access_token
     queue = get_user_queue(user_id)
     pushed = 0
+    skipped_has_test_total = 0
 
     try:
         for f in filters:
@@ -156,12 +160,16 @@ async def produce_jobs(user_id: str) -> int:
             skipped_already = 0
             skipped_blacklist = 0
             skipped_excluded = 0
+            skipped_has_test = 0
             for it in items:
                 if pushed >= MAX_PUSH_PER_RUN:
                     break
                 vid = str(it.get("id") or "")
                 if not vid or vid in already:
                     skipped_already += 1
+                    continue
+                if it.get("has_test") is True:
+                    skipped_has_test += 1
                     continue
                 emp_id = (it.get("employer") or {}).get("id")
                 if emp_id and str(emp_id) in blacklisted:
@@ -180,16 +188,18 @@ async def produce_jobs(user_id: str) -> int:
                 )
                 pushed += 1
             logger.info(
-                "producer: user=%s filter=%s skipped already=%d blacklist=%d excluded=%d",
+                "producer: user=%s filter=%s skipped already=%d blacklist=%d excluded=%d has_test=%d",
                 user_id,
                 f.get("id"),
                 skipped_already,
                 skipped_blacklist,
                 skipped_excluded,
+                skipped_has_test,
             )
+            skipped_has_test_total += skipped_has_test
     finally:
         await persist_if_refreshed(user_id, client, original_access)
 
     logger.info("producer: user=%s DONE pushed=%d total queue size=%d",
                 user_id, pushed, queue.qsize())
-    return pushed
+    return pushed, skipped_has_test_total

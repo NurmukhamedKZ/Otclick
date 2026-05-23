@@ -28,6 +28,7 @@ class StatusResponse(BaseModel):
     queued: int
     next_run_at: str | None
     last_error: str | None
+    skipped_has_test: int = 0
 
 
 @router.post("/start", response_model=StartResponse)
@@ -63,4 +64,5 @@ async def worker_status(user_id: str = Depends(get_current_user)) -> StatusRespo
         queued=get_user_queue(user_id).qsize(),
         next_run_at=handle.next_run_at.isoformat() if handle.next_run_at else None,
         last_error=handle.last_error,
+        skipped_has_test=handle.skipped_has_test,
     )
