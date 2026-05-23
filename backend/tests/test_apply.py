@@ -53,7 +53,7 @@ async def test_apply_one_sent_success():
     client = MagicMock()
     client.access_token = "tok"
     client.post.return_value = {}
-    client.get.return_value = {"employer": {"id": "42"}}
+    client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
 
     with (
         patch.object(apply_mod, "service_client", sb),
@@ -93,6 +93,7 @@ async def test_apply_one_captcha():
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
     client = MagicMock()
     client.access_token = "tok"
+    client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
 
     resp = MagicMock(status_code=403)
     data = {"errors": [{"value": "captcha_required", "captcha_url": "http://cap"}]}
@@ -114,6 +115,7 @@ async def test_apply_one_limit_exceeded():
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
     client = MagicMock()
     client.access_token = "tok"
+    client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
 
     resp = MagicMock(status_code=400)
     data = {"errors": [{"value": "limit_exceeded", "type": "bad"}]}
@@ -135,6 +137,7 @@ async def test_apply_one_token_dead_on_forbidden():
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
     client = MagicMock()
     client.access_token = "tok"
+    client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
 
     resp = MagicMock(status_code=403)
     data = {"errors": [{"value": "token_dead", "type": "auth"}]}
@@ -173,6 +176,139 @@ async def test_apply_one_token_dead_when_creds_invalid():
     assert result == "token_dead"
 
 
+async def test_apply_one_form_required_on_has_test():
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
+    client = MagicMock()
+    client.access_token = "tok"
+    client.get.return_value = {
+        "id": "v1",
+        "has_test": True,
+        "response_letter_required": False,
+        "employer": {"id": "42"},
+    }
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod, "load_api_client", return_value=client),
+        patch.object(apply_mod, "persist_if_refreshed"),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+    assert result == "form_required"
+    client.post.assert_not_called()
+
+
+async def test_apply_one_skips_letter_when_not_required():
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
+    client = MagicMock()
+    client.access_token = "tok"
+    client.get.return_value = {
+        "id": "v1",
+        "has_test": False,
+        "response_letter_required": False,
+        "employer": {"id": "42"},
+    }
+    client.post.return_value = {}
+
+    gen_calls = []
+
+    async def fake_gen(**kwargs):
+        gen_calls.append(kwargs)
+        return "should not be called"
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod, "load_api_client", return_value=client),
+        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.cover_letter_service, "generate", side_effect=fake_gen),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+    assert result == "sent"
+    assert gen_calls == []
+    posted_params = client.post.call_args[0][1]
+    assert "message" not in posted_params
+
+
+async def test_apply_one_generates_letter_when_required():
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
+    client = MagicMock()
+    client.access_token = "tok"
+    client.get.return_value = {
+        "id": "v1",
+        "has_test": False,
+        "response_letter_required": True,
+        "employer": {"id": "42"},
+        "name": "Go Dev",
+    }
+    client.post.return_value = {}
+
+    async def fake_gen(**kwargs):
+        return "GENERATED"
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod, "load_api_client", return_value=client),
+        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.cover_letter_service, "generate", side_effect=fake_gen),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+    assert result == "sent"
+    posted_params = client.post.call_args[0][1]
+    assert posted_params["message"] == "GENERATED"
+
+
+async def test_apply_one_vacancy_gone():
+    from app.hh import errors as hh_errors
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
+    client = MagicMock()
+    client.access_token = "tok"
+    resp = MagicMock(status_code=404)
+    client.get.side_effect = hh_errors.ResourceNotFound(resp, {"description": "gone"})
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod, "load_api_client", return_value=client),
+        patch.object(apply_mod, "persist_if_refreshed"),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+    assert result == "vacancy_gone"
+    client.post.assert_not_called()
+
+
+async def test_apply_one_form_required_on_hh_forbidden_marker():
+    from app.hh import errors as hh_errors
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
+    client = MagicMock()
+    client.access_token = "tok"
+    client.get.return_value = {
+        "id": "v1",
+        "has_test": False,
+        "response_letter_required": False,
+        "employer": {"id": "42"},
+    }
+    resp = MagicMock(status_code=403)
+    client.post.side_effect = hh_errors.Forbidden(
+        resp, {"errors": [{"type": "test_required", "value": "must process test first"}]}
+    )
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod, "load_api_client", return_value=client),
+        patch.object(apply_mod, "persist_if_refreshed"),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+    assert result == "form_required"
+
+
 async def test_apply_one_failed_on_generic_client_error():
     from app.hh import errors as hh_errors
     from app.services import apply as apply_mod
@@ -180,6 +316,7 @@ async def test_apply_one_failed_on_generic_client_error():
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
     client = MagicMock()
     client.access_token = "tok"
+    client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
     resp = MagicMock(status_code=400)
     client.post.side_effect = hh_errors.BadRequest(resp, {"description": "nope"})
 

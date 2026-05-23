@@ -214,8 +214,10 @@ async def _run_loop(handle: RunnerHandle) -> None:
             await notify(user_id, "worker_stop", {"reason": "token_dead"})
             logger.error("user %s: token dead — stopping runner", user_id)
             return
-        elif status == "test_required":
+        elif status == "form_required":
             handle.skipped_has_test += 1
+        elif status == "vacancy_gone":
+            pass
         elif status == "resume_missing":
             handle.last_error = f"resume {job.resume_id} missing"
             await notify(

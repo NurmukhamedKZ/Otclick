@@ -1,6 +1,13 @@
 """Send one job application to hh via POST /negotiations.
 
-Day 13 will swap the cover-letter stub for GPT-generated text.
+Flow:
+  1. Resolve resume_uuid → (hh_resume_id, title)
+  2. Skip if already applied
+  3. Load ApiClient
+  4. Fetch vacancy details ONCE — drives 3 decisions: form_required, employer_id, response_letter_required
+  5. If has_test → record form_required, return
+  6. Generate cover letter ONLY if response_letter_required, else send empty message
+  7. POST /negotiations, handle errors
 """
 
 from __future__ import annotations
@@ -12,6 +19,7 @@ from typing import Literal
 
 from app.db.supabase import service_client
 from app.hh import errors as hh_errors
+from app.services import cover_letter as cover_letter_service
 from app.services.hh_credentials import (
     HHCredentialsInvalid,
     load_api_client,
@@ -28,19 +36,15 @@ ApplyStatus = Literal[
     "skipped",
     "limit_day",
     "token_dead",
-    "test_required",
+    "form_required",
     "resume_missing",
+    "vacancy_gone",
 ]
 
-_TEST_REQUIRED_MARKERS = (
+_FORM_REQUIRED_MARKERS = (
     "must process test",
     "process test first",
     "тест",
-)
-
-STATIC_COVER_LETTER = (
-    "Здравствуйте! Меня заинтересовала ваша вакансия, "
-    "буду рад обсудить детали и присоединиться к команде."
 )
 
 _ALREADY_APPLIED_MARKERS = (
@@ -51,32 +55,31 @@ _ALREADY_APPLIED_MARKERS = (
 )
 
 
-def _resolve_hh_resume_id(user_id: str, resume_uuid: str) -> tuple[str, str] | None:
-    """Returns (hh_resume_id, resume_uuid) or None if not found."""
+def _resolve_resume(user_id: str, resume_uuid: str) -> dict | None:
     res = (
         service_client.table("resumes")
-        .select("id,hh_resume_id")
+        .select("id,hh_resume_id,title")
         .eq("user_id", user_id)
         .eq("id", resume_uuid)
         .maybe_single()
         .execute()
     )
-    row = res.data if res else None
-    if not row:
-        return None
-    return row["hh_resume_id"], row["id"]
+    return res.data if res else None
 
 
 def _already_applied(user_id: str, vacancy_id: str) -> bool:
     res = (
         service_client.table("applications")
-        .select("id")
+        .select("id,status")
         .eq("user_id", user_id)
         .eq("vacancy_id", vacancy_id)
         .limit(1)
         .execute()
     )
-    return bool(res.data)
+    if not res.data:
+        return False
+    # form_required pre-record is not a real attempt — allow re-evaluation
+    return res.data[0].get("status") != "form_required"
 
 
 def _is_already_applied_error(ex: hh_errors.ClientError) -> bool:
@@ -109,17 +112,8 @@ def _record_application(
         service_client.table("applications").upsert(
             row, on_conflict="user_id,vacancy_id"
         ).execute()
-    except Exception:  # pragma: no cover — best-effort log row
+    except Exception:  # pragma: no cover
         logger.exception("failed to persist application row")
-
-
-def _fetch_employer_id(vacancy_id: str, client) -> str | None:
-    try:
-        v = client.get(f"vacancies/{vacancy_id}")
-    except Exception:
-        return None
-    emp = v.get("employer") if isinstance(v, dict) else None
-    return str(emp["id"]) if isinstance(emp, dict) and emp.get("id") else None
 
 
 def _auto_blacklist(user_id: str, employer_id: str | None) -> None:
@@ -138,24 +132,27 @@ def _auto_blacklist(user_id: str, employer_id: str | None) -> None:
         logger.exception("failed to auto-blacklist employer %s", employer_id)
 
 
+def _extract_employer_id(vacancy: dict) -> str | None:
+    emp = vacancy.get("employer") if isinstance(vacancy, dict) else None
+    return str(emp["id"]) if isinstance(emp, dict) and emp.get("id") else None
+
+
 async def apply_one(
     user_id: str, resume_uuid: str, vacancy_id: str
 ) -> ApplyStatus:
-    """Send a single application. Returns final status."""
     loop = asyncio.get_running_loop()
     logger.info(
         "apply: user=%s resume=%s vacancy=%s — start",
         user_id, resume_uuid, vacancy_id,
     )
 
-    resolved = await loop.run_in_executor(
-        None, _resolve_hh_resume_id, user_id, resume_uuid
+    resume = await loop.run_in_executor(
+        None, _resolve_resume, user_id, resume_uuid
     )
-    if resolved is None:
+    if resume is None:
         logger.warning("apply: resume %s not found for user %s", resume_uuid, user_id)
         return "resume_missing"
-    hh_resume_id, resume_uuid = resolved
-    logger.debug("apply: hh_resume_id=%s", hh_resume_id)
+    hh_resume_id = resume["hh_resume_id"]
 
     if await loop.run_in_executor(None, _already_applied, user_id, vacancy_id):
         logger.info("apply: user=%s already applied to vacancy=%s", user_id, vacancy_id)
@@ -167,18 +164,90 @@ async def apply_one(
         logger.error("apply: user=%s creds invalid", user_id)
         return "token_dead"
     original_access = client.access_token
-    cover_letter = STATIC_COVER_LETTER
-    employer_id: str | None = None
 
     try:
+        try:
+            vacancy = await loop.run_in_executor(
+                None, lambda: client.get(f"vacancies/{vacancy_id}")
+            )
+        except hh_errors.ResourceNotFound:
+            logger.info("apply: vacancy=%s gone (404)", vacancy_id)
+            await loop.run_in_executor(
+                None,
+                lambda: _record_application(
+                    user_id=user_id,
+                    resume_uuid=resume_uuid,
+                    vacancy_id=vacancy_id,
+                    status="vacancy_gone",
+                    cover_letter=None,
+                    error="vacancy 404",
+                ),
+            )
+            return "vacancy_gone"
+        except hh_errors.Forbidden as ex:
+            logger.warning("apply: vacancy fetch Forbidden — token dead: %s", ex)
+            await mark_invalid(user_id, f"Forbidden on vacancy fetch: {ex}")
+            return "token_dead"
+
+        employer_id = _extract_employer_id(vacancy)
+
+        # Has-test check survives the producer race: vacancy may have flipped
+        # has_test=true between search and apply.
+        if vacancy.get("has_test") is True:
+            logger.info("apply: vacancy=%s has_test=true → form_required", vacancy_id)
+            await loop.run_in_executor(
+                None,
+                lambda: _record_application(
+                    user_id=user_id,
+                    resume_uuid=resume_uuid,
+                    vacancy_id=vacancy_id,
+                    status="form_required",
+                    cover_letter=None,
+                    error="vacancy.has_test",
+                    employer_id=employer_id,
+                ),
+            )
+            return "form_required"
+
+        letter_required = bool(vacancy.get("response_letter_required"))
+        cover_letter = ""
+        if letter_required:
+            try:
+                cover_letter = await cover_letter_service.generate(
+                    user_id=user_id,
+                    vacancy=vacancy,
+                    resume=resume,
+                    resume_uuid=resume_uuid,
+                )
+            except Exception:
+                logger.exception(
+                    "apply: cover letter generation failed for vacancy=%s — using empty letter and failing",
+                    vacancy_id,
+                )
+                await loop.run_in_executor(
+                    None,
+                    lambda: _record_application(
+                        user_id=user_id,
+                        resume_uuid=resume_uuid,
+                        vacancy_id=vacancy_id,
+                        status="failed",
+                        cover_letter=None,
+                        error="cover_letter_generation_failed",
+                        employer_id=employer_id,
+                    ),
+                )
+                return "failed"
+
         params = {
             "resume_id": hh_resume_id,
             "vacancy_id": vacancy_id,
-            "message": cover_letter,
         }
+        if letter_required:
+            params["message"] = cover_letter
+
         logger.info(
-            "apply: POST /negotiations user=%s vacancy=%s resume=%s",
-            user_id, vacancy_id, hh_resume_id,
+            "apply: POST /negotiations user=%s vacancy=%s letter_required=%s len=%d",
+            user_id, vacancy_id, letter_required, len(cover_letter),
         )
         try:
             await loop.run_in_executor(
@@ -192,8 +261,9 @@ async def apply_one(
                     resume_uuid=resume_uuid,
                     vacancy_id=vacancy_id,
                     status="captcha",
-                    cover_letter=cover_letter,
+                    cover_letter=cover_letter or None,
                     error=ex.captcha_url,
+                    employer_id=employer_id,
                 ),
             )
             return "captcha"
@@ -202,9 +272,9 @@ async def apply_one(
             return "limit_day"
         except hh_errors.Forbidden as ex:
             msg = str(ex).lower()
-            if any(m in msg for m in _TEST_REQUIRED_MARKERS):
+            if any(m in msg for m in _FORM_REQUIRED_MARKERS):
                 logger.info(
-                    "apply: user=%s vacancy=%s requires test — skip",
+                    "apply: user=%s vacancy=%s form_required by hh Forbidden marker",
                     user_id, vacancy_id,
                 )
                 await loop.run_in_executor(
@@ -213,20 +283,18 @@ async def apply_one(
                         user_id=user_id,
                         resume_uuid=resume_uuid,
                         vacancy_id=vacancy_id,
-                        status="skipped",
-                        cover_letter=cover_letter,
-                        error=f"test_required: {ex}",
+                        status="form_required",
+                        cover_letter=cover_letter or None,
+                        error=f"form_required: {ex}",
+                        employer_id=employer_id,
                     ),
                 )
-                return "test_required"
+                return "form_required"
             logger.warning("user %s: hh Forbidden — marking creds invalid", user_id)
             await mark_invalid(user_id, f"Forbidden: {ex}")
             return "token_dead"
         except hh_errors.ClientError as ex:
             if _is_already_applied_error(ex):
-                employer_id = await loop.run_in_executor(
-                    None, _fetch_employer_id, vacancy_id, client
-                )
                 await loop.run_in_executor(
                     None, _auto_blacklist, user_id, employer_id
                 )
@@ -237,7 +305,7 @@ async def apply_one(
                         resume_uuid=resume_uuid,
                         vacancy_id=vacancy_id,
                         status="skipped",
-                        cover_letter=cover_letter,
+                        cover_letter=cover_letter or None,
                         error=f"already_applied: {ex}",
                         employer_id=employer_id,
                     ),
@@ -250,15 +318,13 @@ async def apply_one(
                     resume_uuid=resume_uuid,
                     vacancy_id=vacancy_id,
                     status="failed",
-                    cover_letter=cover_letter,
+                    cover_letter=cover_letter or None,
                     error=f"{type(ex).__name__}: {ex}",
+                    employer_id=employer_id,
                 ),
             )
             return "failed"
 
-        employer_id = await loop.run_in_executor(
-            None, _fetch_employer_id, vacancy_id, client
-        )
         logger.info(
             "apply: SENT user=%s vacancy=%s employer=%s",
             user_id, vacancy_id, employer_id,
@@ -270,7 +336,7 @@ async def apply_one(
                 resume_uuid=resume_uuid,
                 vacancy_id=vacancy_id,
                 status="sent",
-                cover_letter=cover_letter,
+                cover_letter=cover_letter or None,
                 error=None,
                 employer_id=employer_id,
             ),
