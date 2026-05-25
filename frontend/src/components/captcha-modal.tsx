@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { apiFetch } from "@/lib/api";
 import type { CaptchaRequest } from "@/lib/types";
 
 const SCREENSHOT_BUCKET = "captcha-screenshots";
@@ -85,6 +86,27 @@ export default function CaptchaModal() {
     };
   }, [supabase]);
 
+  async function handleSolve() {
+    if (!pending) return;
+    try {
+      await apiFetch(`/api/captcha/${pending.id}/solve`, { method: "POST" });
+    } catch {
+      /* re-check is best-effort; the 5s auto-poll will still fire */
+    }
+  }
+
+  async function handleDismiss() {
+    const id = pending?.id;
+    setPending(null);
+    setImageUrl(null);
+    if (!id) return;
+    try {
+      await apiFetch(`/api/captcha/${id}/dismiss`, { method: "POST" });
+    } catch {
+      /* worker stop is best-effort */
+    }
+  }
+
   if (!pending) return null;
 
   return (
@@ -103,23 +125,31 @@ export default function CaptchaModal() {
           />
         )}
 
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2">
           {pending.captcha_url && (
             <a
               href={pending.captcha_url}
               target="_blank"
               rel="noreferrer"
-              className="flex-1 rounded bg-black px-3 py-2 text-center text-sm text-white hover:bg-gray-800"
+              className="rounded bg-black px-3 py-2 text-center text-sm text-white hover:bg-gray-800"
             >
               Открыть на hh
             </a>
           )}
-          <button
-            onClick={() => setPending(null)}
-            className="rounded border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
-          >
-            Закрыть
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleSolve}
+              className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
+            >
+              Я решил, проверить
+            </button>
+            <button
+              onClick={handleDismiss}
+              className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
+            >
+              Закрыть
+            </button>
+          </div>
         </div>
 
         <p className="mt-3 text-xs text-gray-500">
