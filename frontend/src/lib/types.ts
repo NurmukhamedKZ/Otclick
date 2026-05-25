@@ -68,6 +68,29 @@ export type WorkerStopResponse = {
   stopped: boolean;
 };
 
+export type Application = {
+  id: string;
+  user_id: string;
+  resume_id: string | null;
+  vacancy_id: string;
+  employer_id: string | null;
+  status: string;
+  cover_letter: string | null;
+  applied_at: string | null;
+  error: string | null;
+  created_at: string;
+};
+
+export type CaptchaRequest = {
+  id: string;
+  user_id: string;
+  storage_path: string | null;
+  captcha_url: string | null;
+  solved: boolean;
+  created_at: string;
+  solved_at: string | null;
+};
+
 export type NotificationRow = {
   id: string;
   type: string;

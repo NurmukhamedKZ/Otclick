@@ -4,8 +4,12 @@ import SignOutButton from "./sign-out-button";
 import HHStatusBanner from "./hh-status-banner";
 import ResumesCard from "./resumes-card";
 import WorkerCard from "./worker-card";
+import ApplicationsCard from "./applications-card";
 import NotificationsCard from "./notifications-card";
 import DebugCard from "./debug-card";
+import RealtimeBridge from "./realtime-bridge";
+import Toaster from "@/components/toaster";
+import CaptchaModal from "@/components/captcha-modal";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -34,8 +38,13 @@ export default async function DashboardPage() {
       <HHStatusBanner />
       <ResumesCard />
       <WorkerCard />
+      <ApplicationsCard />
       <NotificationsCard />
       <DebugCard />
+
+      <RealtimeBridge />
+      <CaptchaModal />
+      <Toaster />
     </main>
   );
 }
