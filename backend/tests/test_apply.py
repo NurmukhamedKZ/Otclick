@@ -87,6 +87,8 @@ async def test_apply_one_skipped_already_applied_locally():
 
 
 async def test_apply_one_captcha():
+    from unittest.mock import AsyncMock
+
     from app.hh import errors as hh_errors
     from app.services import apply as apply_mod
 
@@ -96,16 +98,18 @@ async def test_apply_one_captcha():
     client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
 
     resp = MagicMock(status_code=403)
-    data = {"errors": [{"value": "captcha_required", "captcha_url": "http://cap"}]}
+    data = {"errors": [{"value": "captcha_required", "captcha_url": "https://hh.ru/cap.png"}]}
     client.post.side_effect = hh_errors.CaptchaRequired(resp, data)
 
     with (
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.captcha_service, "create_request", new=AsyncMock()) as create_req,
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1")
     assert result == "captcha"
+    create_req.assert_awaited_once_with("u1", "https://hh.ru/cap.png")
 
 
 async def test_apply_one_limit_exceeded():

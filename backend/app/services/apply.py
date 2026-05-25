@@ -19,6 +19,7 @@ from typing import Literal
 
 from app.db.supabase import service_client
 from app.hh import errors as hh_errors
+from app.services import captcha as captcha_service
 from app.services import cover_letter as cover_letter_service
 from app.services.hh_credentials import (
     HHCredentialsInvalid,
@@ -266,6 +267,10 @@ async def apply_one(
                     employer_id=employer_id,
                 ),
             )
+            try:
+                await captcha_service.create_request(user_id, ex.captcha_url)
+            except Exception:
+                logger.exception("apply: failed to create captcha_request")
             return "captcha"
         except hh_errors.LimitExceeded:
             logger.info("user %s: hh LimitExceeded on vacancy %s", user_id, vacancy_id)
