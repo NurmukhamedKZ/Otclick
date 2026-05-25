@@ -33,12 +33,20 @@ export async function updateSession(request: NextRequest) {
   const isProtected =
     path.startsWith("/dashboard") ||
     path.startsWith("/onboarding") ||
-    path.startsWith("/filters");
-  const isAuthPage = path === "/login" || path === "/signup";
+    path.startsWith("/applications") ||
+    path.startsWith("/billing") ||
+    path.startsWith("/account");
+  const isAuthPage = path === "/auth";
+
+  if (path === "/login" || path === "/signup" || path === "/filters") {
+    const url = request.nextUrl.clone();
+    url.pathname = path === "/filters" ? "/dashboard" : "/auth";
+    return NextResponse.redirect(url);
+  }
 
   if (!user && isProtected) {
     const url = request.nextUrl.clone();
-    url.pathname = "/login";
+    url.pathname = "/auth";
     return NextResponse.redirect(url);
   }
 

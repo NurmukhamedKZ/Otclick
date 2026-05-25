@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { NotificationRow } from "@/lib/types";
+import { Card, CardHeader } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Empty } from "@/components/ui/empty";
+import { SkeletonList } from "@/components/ui/skeleton";
 
 const TYPE_COLOR: Record<string, string> = {
   apply_success: "bg-green-100 text-green-800",
@@ -71,39 +75,27 @@ export default function NotificationsCard() {
   }
 
   return (
-    <section className="mb-6 rounded border border-gray-200 bg-white p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-semibold">Уведомления</h2>
-        <div className="flex gap-2">
-          <button
-            onClick={load}
-            className="rounded border border-gray-300 px-3 py-1 text-sm hover:bg-gray-50"
-          >
-            Refresh
-          </button>
-          <button
-            onClick={markAllRead}
-            disabled={busy}
-            className="rounded border border-gray-300 px-3 py-1 text-sm hover:bg-gray-50 disabled:opacity-50"
-          >
-            Прочитать все
-          </button>
-          <button
-            onClick={clearAll}
-            disabled={busy}
-            className="rounded border border-red-300 px-3 py-1 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
-          >
-            Очистить
-          </button>
-        </div>
-      </div>
+    <Card>
+      <CardHeader
+        title="Уведомления"
+        action={
+          <div className="flex gap-1.5">
+            <Button onClick={markAllRead} disabled={busy} size="sm">
+              Прочитать все
+            </Button>
+            <Button onClick={clearAll} disabled={busy} variant="danger" size="sm">
+              Очистить
+            </Button>
+          </div>
+        }
+      />
 
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
 
       {rows === null ? (
-        <p className="text-sm text-gray-500">Загрузка…</p>
+        <SkeletonList rows={3} />
       ) : rows.length === 0 ? (
-        <p className="text-sm text-gray-500">Пусто.</p>
+        <Empty title="Пусто" hint="Тут появятся события воркера." />
       ) : (
         <ul className="divide-y divide-gray-100 text-sm">
           {rows.map((n) => (
@@ -130,6 +122,6 @@ export default function NotificationsCard() {
           ))}
         </ul>
       )}
-    </section>
+    </Card>
   );
 }

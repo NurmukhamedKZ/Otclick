@@ -21,6 +21,17 @@ class Settings(BaseSettings):
     INTERNAL_CRON_TOKEN: str = ""
     REFRESH_THRESHOLD_DAYS: int = 2
 
+    # CloudPayments billing. PUBLIC_ID is sent to the widget; API_SECRET is the
+    # HMAC key for webhook verification (Content-HMAC header) — never exposed.
+    CLOUDPAYMENTS_PUBLIC_ID: str = ""
+    CLOUDPAYMENTS_API_SECRET: str = ""
+    PLAN_PRICE: int = 999
+    PLAN_CURRENCY: str = "RUB"
+    PLAN_NAME: str = "AI Autoclicker Pro"
+    # Widget recurrent flag: charge every PLAN_PERIOD PLAN_INTERVAL(s).
+    PLAN_INTERVAL: str = "Month"
+    PLAN_PERIOD: int = 1
+
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1/chat/completions"
     OPENAI_MODEL: str = "gpt-4o-mini"

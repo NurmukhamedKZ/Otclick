@@ -105,6 +105,32 @@ export type CaptchaRequest = {
   solved_at: string | null;
 };
 
+export type SubscribeParams = {
+  public_id: string;
+  amount: number;
+  currency: string;
+  description: string;
+  account_id: string;
+  invoice_id: string;
+  interval: string;
+  period: number;
+};
+
+export type PaymentEntry = {
+  provider_payment_id: string;
+  amount: number | null;
+  status: string;
+  created_at: string | null;
+};
+
+export type BillingStatus = {
+  plan: string;
+  trial_ends: string | null;
+  plan_expires_at: string | null;
+  next_charge_at: string | null;
+  history: PaymentEntry[];
+};
+
 export type NotificationRow = {
   id: string;
   type: string;
