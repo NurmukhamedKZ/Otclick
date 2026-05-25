@@ -137,3 +137,69 @@ async def test_registry_resume_captcha():
         handle.state = "running"
         assert registry.resume_captcha("u2") is False
         await registry.stop("u2")
+
+
+async def test_probe_me_ok():
+    from unittest.mock import MagicMock
+    from app.worker import runner
+
+    client = MagicMock()
+    client.access_token = "tok"
+    client.get.return_value = {"id": "me1"}
+
+    with (
+        patch.object(runner, "load_api_client", return_value=client),
+        patch.object(runner, "persist_if_refreshed"),
+    ):
+        result = await runner._probe_me("u1")
+    assert result == "ok"
+
+
+async def test_probe_me_captcha():
+    from unittest.mock import MagicMock
+    from app.hh import errors as hh_errors
+    from app.worker import runner
+
+    client = MagicMock()
+    client.access_token = "tok"
+    resp = type("R", (), {"status_code": 403, "request": None, "headers": {}})()
+    data = {"errors": [{"value": "captcha_required", "captcha_url": "https://x"}]}
+    client.get.side_effect = hh_errors.CaptchaRequired(resp, data)
+
+    with (
+        patch.object(runner, "load_api_client", return_value=client),
+        patch.object(runner, "persist_if_refreshed"),
+    ):
+        result = await runner._probe_me("u1")
+    assert result == "captcha"
+
+
+async def test_probe_me_forbidden_token_dead():
+    from unittest.mock import AsyncMock, MagicMock
+    from app.hh import errors as hh_errors
+    from app.worker import runner
+
+    client = MagicMock()
+    client.access_token = "tok"
+    resp = type("R", (), {"status_code": 403, "request": None, "headers": {}})()
+    client.get.side_effect = hh_errors.Forbidden(resp, {"description": "nope"})
+
+    with (
+        patch.object(runner, "load_api_client", return_value=client),
+        patch.object(runner, "persist_if_refreshed"),
+        patch.object(runner, "mark_invalid", new=AsyncMock()) as mi,
+    ):
+        result = await runner._probe_me("u1")
+    assert result == "token_dead"
+    mi.assert_awaited_once()
+
+
+async def test_probe_me_load_fails_token_dead():
+    from app.worker import runner
+
+    def _boom(_uid):
+        raise RuntimeError("no creds")
+
+    with patch.object(runner, "load_api_client", side_effect=_boom):
+        result = await runner._probe_me("u1")
+    assert result == "token_dead"

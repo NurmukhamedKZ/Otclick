@@ -18,6 +18,12 @@ import requests as _requests
 
 from app.hh import errors as hh_errors
 from app.services import apply as apply_service
+from app.services import captcha as captcha_service
+from app.services.hh_credentials import (
+    load_api_client,
+    mark_invalid,
+    persist_if_refreshed,
+)
 from app.services.notifications import notify
 from app.worker import limiter, throttle
 from app.worker.queue import ApplyJob, drop_user_queue, get_user_queue
@@ -31,6 +37,9 @@ HOUR_COOLDOWN_S = 60 * 60 + 30
 
 # Sleep when producer found 0 jobs and we're idle.
 IDLE_REFILL_SLEEP_S = 10
+
+# Plan-B captcha poll interval (seconds) — re-probe GET /me while paused.
+CAPTCHA_POLL_S = 5
 
 
 @dataclass
@@ -80,6 +89,38 @@ async def _maybe_apply_with_retry(job: ApplyJob) -> apply_service.ApplyStatus:
         return "failed"
 
 
+async def _probe_me(user_id: str) -> str:
+    """Probe GET /me to detect whether the hh captcha lifted.
+
+    Returns 'ok' (clear), 'captcha' (still blocked / transient — keep polling),
+    or 'token_dead' (creds unusable — stop).
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        client = await load_api_client(user_id)
+    except Exception:
+        logger.warning(
+            "probe_me: cannot load creds for %s — token_dead", user_id, exc_info=True
+        )
+        return "token_dead"
+    original = client.access_token
+    try:
+        await loop.run_in_executor(None, lambda: client.get("me"))
+        return "ok"
+    except hh_errors.CaptchaRequired:
+        return "captcha"
+    except hh_errors.Forbidden as ex:
+        await mark_invalid(user_id, f"Forbidden on /me probe: {ex}")
+        return "token_dead"
+    except Exception:
+        logger.warning(
+            "probe_me: transient error for %s — keep polling", user_id, exc_info=True
+        )
+        return "captcha"
+    finally:
+        await persist_if_refreshed(user_id, client, original)
+
+
 def _seconds_until_next_local_midnight(user_id: str) -> float:
     tz = limiter._tz_for_user(user_id)  # ok — both worker module
     now = datetime.now(tz)
@@ -103,9 +144,34 @@ async def _run_loop(handle: RunnerHandle) -> None:
         # Captcha pause — wait until external resume sets event.
         if handle.state == "paused_captcha":
             handle.next_run_at = None
-            await handle.captcha_event.wait()
-            handle.captcha_event.clear()
-            handle.state = "running"
+            while handle.state == "paused_captcha":
+                try:
+                    await asyncio.wait_for(
+                        handle.captcha_event.wait(), timeout=CAPTCHA_POLL_S
+                    )
+                except asyncio.TimeoutError:
+                    pass
+                handle.captcha_event.clear()
+                if handle.state != "paused_captcha":
+                    break
+                result = await _probe_me(user_id)
+                if result == "ok":
+                    await captcha_service.mark_solved(user_id)
+                    await notify(user_id, "captcha", {"resolved": True})
+                    handle.state = "running"
+                    logger.info("user %s: captcha cleared — resuming", user_id)
+                elif result == "token_dead":
+                    handle.state = "stopped"
+                    handle.last_error = "hh token dead — reconnect required"
+                    await notify(user_id, "token_dead", {})
+                    await notify(user_id, "worker_stop", {"reason": "token_dead"})
+                    logger.error(
+                        "user %s: token dead during captcha probe — stopping", user_id
+                    )
+                    return
+                # "captcha" → keep polling
+            if handle.state == "stopped":
+                return
 
         # Limits.
         check = await limiter.check(user_id)
