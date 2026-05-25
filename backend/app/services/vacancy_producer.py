@@ -7,6 +7,7 @@ import logging
 import re
 
 from app.db.supabase import service_client
+from app.services.blacklist import bulk_auto_blacklist
 from app.services.filters_service import _filter_to_search_params
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
 from app.worker.queue import ApplyJob, get_user_queue
@@ -188,12 +189,23 @@ async def produce_jobs(user_id: str) -> tuple[int, int]:
             skipped_blacklist = 0
             skipped_excluded = 0
             skipped_has_test = 0
+            skipped_relations = 0
+            relations_blacklist: dict[str, str | None] = {}
             for it in items:
                 if pushed >= MAX_PUSH_PER_RUN:
                     break
                 vid = str(it.get("id") or "")
                 if not vid or vid in already:
                     skipped_already += 1
+                    continue
+                # Non-empty relations = already interacted with this vacancy
+                # (responded / invited / rejected) → skip + blacklist employer
+                # so we never re-apply to the same company.
+                if it.get("relations"):
+                    skipped_relations += 1
+                    emp = it.get("employer") or {}
+                    if emp.get("id"):
+                        relations_blacklist[str(emp["id"])] = emp.get("name")
                     continue
                 if it.get("has_test") is True:
                     skipped_has_test += 1
@@ -225,14 +237,20 @@ async def produce_jobs(user_id: str) -> tuple[int, int]:
                     )
                 )
                 pushed += 1
+            if relations_blacklist:
+                await loop.run_in_executor(
+                    None, bulk_auto_blacklist, user_id, relations_blacklist
+                )
             logger.info(
-                "producer: user=%s filter=%s skipped already=%d blacklist=%d excluded=%d has_test=%d",
+                "producer: user=%s filter=%s skipped already=%d blacklist=%d "
+                "excluded=%d has_test=%d relations=%d",
                 user_id,
                 f.get("id"),
                 skipped_already,
                 skipped_blacklist,
                 skipped_excluded,
                 skipped_has_test,
+                skipped_relations,
             )
             skipped_has_test_total += skipped_has_test
     finally:

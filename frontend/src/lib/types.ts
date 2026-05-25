@@ -49,6 +49,20 @@ export type FilterPreview = {
   items: VacancyPreviewItem[];
 };
 
+export type BlacklistEntry = {
+  id: string;
+  employer_id: string;
+  employer_name: string | null;
+  reason: string | null;
+  created_at: string | null;
+};
+
+export type BlacklistCreate = {
+  employer_id: string;
+  employer_name?: string | null;
+  reason?: string | null;
+};
+
 export type WorkerStatus = {
   state: "running" | "paused_captcha" | "paused_limit" | "stopped";
   today_count: number;

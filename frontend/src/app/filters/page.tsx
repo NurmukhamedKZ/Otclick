@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useFilters } from "@/hooks/useFilters";
 import FilterForm from "./filter-form";
 import FilterRow from "./filter-row";
+import BlacklistSection from "./blacklist-section";
 
 export default function FiltersPage() {
   const { items, error, create, update, remove, preview } = useFilters();
@@ -45,6 +46,8 @@ export default function FiltersPage() {
           ))}
         </ul>
       )}
+
+      <BlacklistSection />
     </main>
   );
 }
