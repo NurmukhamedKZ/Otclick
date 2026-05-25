@@ -34,3 +34,8 @@ class HHStatusResponse(BaseModel):
     expires_at: datetime | None = None
     last_refreshed_at: datetime | None = None
     hh_user_id: str | None = None
+
+
+class HHRefreshResponse(BaseModel):
+    status: Literal["refreshed", "invalid", "error"]
+    error: str | None = None

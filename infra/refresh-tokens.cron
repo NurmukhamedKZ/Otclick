@@ -1,0 +1,10 @@
+# hh access-token refresh — system crontab entry.
+# Install: crontab -e  (or drop in /etc/cron.d/ with a user field).
+#
+# Runs daily 03:17 server time. Backend only refreshes creds expiring within
+# REFRESH_THRESHOLD_DAYS (hh refresh token is single-use + usable only after the
+# access token expires), so daily cadence is safe and idempotent.
+#
+# INTERNAL_CRON_TOKEN must match the backend's env value.
+
+17 3 * * * curl -fsS -X POST http://127.0.0.1:8000/internal/cron/refresh-tokens -H "X-Internal-Token: ${INTERNAL_CRON_TOKEN}" >> /var/log/hh-refresh.log 2>&1

@@ -5,10 +5,12 @@ from app.schemas.auth import (
     CaptchaSolveRequest,
     HHConnectRequest,
     HHConnectResponse,
+    HHRefreshResponse,
     HHStatusResponse,
     JobStatusResponse,
 )
-from app.services import hh_auth
+from app.services import hh_auth, token_refresh
+from app.services.hh_credentials import HHCredentialsInvalid
 
 router = APIRouter(prefix="/api/hh", tags=["hh"])
 
@@ -55,6 +57,19 @@ async def submit_captcha(
 @router.post("/disconnect", status_code=status.HTTP_204_NO_CONTENT)
 async def disconnect(user_id: str = Depends(get_current_user)):
     hh_auth.disconnect(user_id)
+
+
+@router.post("/refresh", response_model=HHRefreshResponse)
+async def refresh(user_id: str = Depends(get_current_user)):
+    """Force-refresh access_token for the current user."""
+    try:
+        result = await token_refresh.refresh_user(user_id)
+    except HHCredentialsInvalid as ex:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"hh credentials invalid: {ex.reason}",
+        ) from ex
+    return HHRefreshResponse(status=result["status"], error=result.get("error"))
 
 
 @router.get("/status", response_model=HHStatusResponse)

@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     DEBUG_ENDPOINTS: bool = False
     LOG_LEVEL: str = "INFO"
 
+    # hh refresh-token cron: shared secret for /internal/cron/* + near-expiry window.
+    # hh refresh token is single-use and only usable once the access token expired,
+    # so the cron only refreshes creds expiring within this window (not all daily).
+    INTERNAL_CRON_TOKEN: str = ""
+    REFRESH_THRESHOLD_DAYS: int = 2
+
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1/chat/completions"
     OPENAI_MODEL: str = "gpt-4o-mini"

@@ -4,10 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AI autoclicker for hh.ru/hh.kz — automates job applications. Two sub-projects:
+AI autoclicker for hh.ru/hh.kz — automates job applications. Sub-projects:
 
-- **`backend/`** — FastAPI service (active build)
+- **`backend/`** — FastAPI service (active build) + standalone worker (`worker_main.py`)
+- **`frontend/`** — Next.js 16 + React 19 + Tailwind v4 (Supabase SSR auth)
 - **`hh-applicant-tool/`** — existing Python CLI tool (source to copy from, not modify)
+- **`MVP_PLAN.md`** — day-by-day build plan; check before starting work
 
 Key discovery: hh.ru password grant OAuth is **broken** (`unsupported_grant_type`). Playwright headless browser is the only working login method.
 
@@ -20,6 +22,12 @@ source .venv/bin/activate
 
 # Dev server
 cd backend && uvicorn app.main:app --reload
+
+# Standalone worker (systemd entrypoint)
+cd backend && python worker_main.py
+
+# Frontend dev
+cd frontend && npm run dev
 
 # All tests
 cd backend && python -m pytest tests/ -v
@@ -50,7 +58,16 @@ api/
   auth.py                    — /api/hh/* routes (connect, poll, captcha, disconnect, status)
   resumes.py                 — /api/resumes/* routes (sync, list)
   filters.py                 — /api/filters/* routes (CRUD + vacancy preview)
-  router.py                  — includes auth, resumes, filters routers
+  captcha.py                 — /api/captcha/* (pending list, solve, dismiss)
+  worker.py                  — /api/worker/* (status/control per user)
+  router.py                  — includes auth, resumes, filters, captcha, worker routers
+ai/
+  base.py, openai.py         — ChatOpenAI client with retry (cover letter generation)
+worker/
+  runner.py                  — per-user apply loop; reads filters, polls captcha queue
+  queue.py                   — captcha request queue (DB-backed pending/solve/dismiss)
+  limiter.py                 — daily/hourly apply caps
+  throttle.py                — inter-request delay (rate limit)
 db/
   supabase.py                — service_client (bypasses RLS), anon_client (JWT validation only)
 hh/
@@ -71,7 +88,11 @@ schemas/
 
 **OAuth job flow**: `POST /api/hh/connect` → creates async job (UUID) → returns immediately → client polls `GET /api/hh/connect/{job_id}`. Job runs Playwright in background task (`asyncio.create_task`).
 
-**Captcha handoff**: when Playwright sees captcha, job pauses at `captcha_queue.wait_for()` (5-min timeout), uploads screenshot to Supabase Storage, client sees `captcha_required` + signed URL → user solves → `POST /api/hh/connect/{job_id}/captcha`.
+**Captcha handoff (plan-A, OAuth path)**: when Playwright sees captcha, job pauses at `captcha_queue.wait_for()` (5-min timeout), uploads screenshot to Supabase Storage, client sees `captcha_required` + signed URL → user solves → `POST /api/hh/connect/{job_id}/captcha`.
+
+**Captcha handoff (plan-B, worker path)**: worker hitting captcha during apply inserts a `captcha_requests` row → user lists via `/api/captcha/pending`, solves via `/api/captcha/{id}/solve` (or dismisses) → runner polls queue and resumes.
+
+**Worker model**: `worker_main.py` loads active users from `hh_credentials` (where `invalid_at IS NULL`) → spawns one runner per user via `get_registry()`. Runner pulls vacancies via saved filters, applies through `ApiClient`, defers to captcha queue on challenge. Graceful shutdown on SIGTERM/SIGINT.
 
 **Supabase client split**: `anon_client` only for JWT validation. `service_client` for all DB/storage writes (bypasses RLS). All sync Supabase calls run in `loop.run_in_executor` — never block the event loop.
 
@@ -87,6 +108,7 @@ schemas/
 - `hh_credentials` — encrypted hh tokens per user (full RLS denial, service_role only)
 - `resumes` — user resume list synced from hh, unique on `(user_id, hh_resume_id)`
 - `filters` — saved vacancy search filters per user
+- `captcha_requests` — pending captcha challenges raised by worker
 - `captcha-screenshots` — Supabase Storage bucket for captcha images
 
 ## Tests
