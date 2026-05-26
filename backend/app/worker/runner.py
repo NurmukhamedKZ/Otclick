@@ -93,7 +93,7 @@ async def _probe_me(user_id: str) -> str:
     """Probe GET /me to detect whether the hh captcha lifted.
 
     Returns 'ok' (clear), 'captcha' (still blocked / transient — keep polling),
-    or 'token_dead' (creds unusable — stop).
+    'token_dead' (creds unusable — stop), or 'banned' (account blocked — stop).
     """
     loop = asyncio.get_running_loop()
     try:
@@ -110,6 +110,9 @@ async def _probe_me(user_id: str) -> str:
     except hh_errors.CaptchaRequired:
         return "captcha"
     except hh_errors.Forbidden as ex:
+        if apply_service.is_ban_error(ex):
+            await mark_invalid(user_id, f"account banned (/me probe): {ex}")
+            return "banned"
         await mark_invalid(user_id, f"Forbidden on /me probe: {ex}")
         return "token_dead"
     except Exception:
@@ -167,6 +170,15 @@ async def _run_loop(handle: RunnerHandle) -> None:
                     await notify(user_id, "worker_stop", {"reason": "token_dead"})
                     logger.error(
                         "user %s: token dead during captcha probe — stopping", user_id
+                    )
+                    return
+                elif result == "banned":
+                    handle.state = "stopped"
+                    handle.last_error = "hh account banned"
+                    await notify(user_id, "account_banned", {})
+                    await notify(user_id, "worker_stop", {"reason": "account_banned"})
+                    logger.error(
+                        "user %s: account banned during captcha probe — stopping", user_id
                     )
                     return
                 # "captcha" → keep polling
@@ -279,6 +291,13 @@ async def _run_loop(handle: RunnerHandle) -> None:
             await notify(user_id, "token_dead", {"vacancy_id": job.vacancy_id})
             await notify(user_id, "worker_stop", {"reason": "token_dead"})
             logger.error("user %s: token dead — stopping runner", user_id)
+            return
+        elif status == "account_banned":
+            handle.state = "stopped"
+            handle.last_error = "hh account banned"
+            await notify(user_id, "account_banned", {"vacancy_id": job.vacancy_id})
+            await notify(user_id, "worker_stop", {"reason": "account_banned"})
+            logger.error("user %s: account banned — stopping runner", user_id)
             return
         elif status == "form_required":
             handle.skipped_has_test += 1

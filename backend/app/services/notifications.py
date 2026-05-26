@@ -16,6 +16,7 @@ NotificationType = Literal[
     "worker_stop",
     "limit_reached",
     "token_dead",
+    "account_banned",
     "resume_missing",
 ]
 

@@ -37,6 +37,7 @@ ApplyStatus = Literal[
     "skipped",
     "limit_day",
     "token_dead",
+    "account_banned",
     "form_required",
     "resume_missing",
     "vacancy_gone",
@@ -54,6 +55,28 @@ _ALREADY_APPLIED_MARKERS = (
     "повтор",
     "уже отправ",
 )
+
+# hh account banned/blocked — reconnect won't help (vs token_dead which it does).
+_BANNED_MARKERS = (
+    "blocked",
+    "banned",
+    "disabled",
+    "заблокир",
+)
+
+# Resume deleted/hidden on hh side after we synced it locally.
+_RESUME_GONE_MARKERS = (
+    "resume_not_found",
+    "resume_deleted",
+    "resume_visibility",
+    "unknown_resume",
+    "resume not found",
+)
+
+
+def _match_markers(ex: Exception, markers: tuple[str, ...]) -> bool:
+    msg = str(ex).lower()
+    return any(m in msg for m in markers)
 
 
 def _resolve_resume(user_id: str, resume_uuid: str) -> dict | None:
@@ -84,8 +107,23 @@ def _already_applied(user_id: str, vacancy_id: str) -> bool:
 
 
 def _is_already_applied_error(ex: hh_errors.ClientError) -> bool:
-    msg = str(ex).lower()
-    return any(m in msg for m in _ALREADY_APPLIED_MARKERS)
+    return _match_markers(ex, _ALREADY_APPLIED_MARKERS)
+
+
+def is_ban_error(ex: Exception) -> bool:
+    """Account-level ban/block (reconnect won't help). Shared with runner probe."""
+    return _match_markers(ex, _BANNED_MARKERS)
+
+
+def _disable_filters_for_resume(user_id: str, resume_uuid: str) -> None:
+    """Resume gone on hh → disable its filters so producer stops re-queueing it.
+    Non-destructive (vs deleting the resume row, which cascades to filters)."""
+    try:
+        service_client.table("filters").update({"enabled": False}).eq(
+            "user_id", user_id
+        ).eq("resume_id", resume_uuid).execute()
+    except Exception:  # pragma: no cover
+        logger.exception("failed to disable filters for dead resume %s", resume_uuid)
 
 
 def _record_application(
@@ -186,6 +224,10 @@ async def apply_one(
             )
             return "vacancy_gone"
         except hh_errors.Forbidden as ex:
+            if is_ban_error(ex):
+                logger.error("apply: vacancy fetch Forbidden — account banned: %s", ex)
+                await mark_invalid(user_id, f"account banned (vacancy fetch): {ex}")
+                return "account_banned"
             logger.warning("apply: vacancy fetch Forbidden — token dead: %s", ex)
             await mark_invalid(user_id, f"Forbidden on vacancy fetch: {ex}")
             return "token_dead"
@@ -295,6 +337,19 @@ async def apply_one(
                     ),
                 )
                 return "form_required"
+            if is_ban_error(ex):
+                logger.error("user %s: hh Forbidden — account banned", user_id)
+                await mark_invalid(user_id, f"account banned: {ex}")
+                return "account_banned"
+            if _match_markers(ex, _RESUME_GONE_MARKERS):
+                logger.warning(
+                    "user %s: resume %s gone on hh — disabling its filters",
+                    user_id, resume_uuid,
+                )
+                await loop.run_in_executor(
+                    None, _disable_filters_for_resume, user_id, resume_uuid
+                )
+                return "resume_missing"
             logger.warning("user %s: hh Forbidden — marking creds invalid", user_id)
             await mark_invalid(user_id, f"Forbidden: {ex}")
             return "token_dead"
@@ -316,6 +371,15 @@ async def apply_one(
                     ),
                 )
                 return "skipped"
+            if _match_markers(ex, _RESUME_GONE_MARKERS):
+                logger.warning(
+                    "user %s: resume %s gone on hh (%s) — disabling its filters",
+                    user_id, resume_uuid, type(ex).__name__,
+                )
+                await loop.run_in_executor(
+                    None, _disable_filters_for_resume, user_id, resume_uuid
+                )
+                return "resume_missing"
             await loop.run_in_executor(
                 None,
                 lambda: _record_application(

@@ -313,6 +313,92 @@ async def test_apply_one_form_required_on_hh_forbidden_marker():
     assert result == "form_required"
 
 
+async def test_apply_one_account_banned_on_negotiations_forbidden():
+    from app.hh import errors as hh_errors
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
+    client = MagicMock()
+    client.access_token = "tok"
+    client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
+
+    resp = MagicMock(status_code=403)
+    data = {"errors": [{"type": "account", "value": "user_blocked"}]}
+    client.post.side_effect = hh_errors.Forbidden(resp, data)
+
+    mark_calls = []
+
+    async def fake_mark(user_id, reason):
+        mark_calls.append((user_id, reason))
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod, "load_api_client", return_value=client),
+        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod, "mark_invalid", side_effect=fake_mark),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+    assert result == "account_banned"
+    assert mark_calls and "banned" in mark_calls[0][1].lower()
+
+
+async def test_apply_one_account_banned_on_vacancy_fetch():
+    from app.hh import errors as hh_errors
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
+    client = MagicMock()
+    client.access_token = "tok"
+    resp = MagicMock(status_code=403)
+    client.get.side_effect = hh_errors.Forbidden(
+        resp, {"errors": [{"type": "auth", "value": "account_blocked"}]}
+    )
+
+    async def fake_mark(user_id, reason):
+        pass
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod, "load_api_client", return_value=client),
+        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod, "mark_invalid", side_effect=fake_mark),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+    assert result == "account_banned"
+    client.post.assert_not_called()
+
+
+async def test_apply_one_resume_gone_on_hh_disables_filters():
+    from app.hh import errors as hh_errors
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
+    client = MagicMock()
+    client.access_token = "tok"
+    client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
+
+    resp = MagicMock(status_code=400)
+    client.post.side_effect = hh_errors.BadRequest(
+        resp, {"errors": [{"type": "bad_argument", "value": "resume_not_found"}]}
+    )
+
+    disable_calls = []
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod, "load_api_client", return_value=client),
+        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(
+            apply_mod,
+            "_disable_filters_for_resume",
+            side_effect=lambda uid, ruid: disable_calls.append((uid, ruid)),
+        ),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+    assert result == "resume_missing"
+    assert disable_calls == [("u1", "r-uuid")]
+
+
 async def test_apply_one_failed_on_generic_client_error():
     from app.hh import errors as hh_errors
     from app.services import apply as apply_mod

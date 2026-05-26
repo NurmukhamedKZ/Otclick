@@ -12,6 +12,7 @@ const ICON: Record<string, React.ReactNode> = {
   apply_success: <ICheck size={14} />,
   limit_reached: <IBolt size={14} />,
   token_dead: <IClose size={14} />,
+  account_banned: <IClose size={14} />,
   worker_stop: <ILink size={14} />,
   resume_missing: <ILink size={14} />,
 };
@@ -21,6 +22,7 @@ const COLOR: Record<string, string> = {
   apply_success: "var(--ok)",
   limit_reached: "var(--yellow)",
   token_dead: "var(--err)",
+  account_banned: "var(--err)",
   worker_stop: "var(--muted-2)",
   resume_missing: "var(--muted-2)",
 };
@@ -31,6 +33,7 @@ const TITLE: Record<string, string> = {
   limit_reached: "Достигнут дневной лимит",
   worker_stop: "Worker остановлен",
   token_dead: "Токен hh умер",
+  account_banned: "Аккаунт hh заблокирован",
   resume_missing: "Резюме недоступно",
 };
 

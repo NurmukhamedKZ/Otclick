@@ -203,3 +203,25 @@ async def test_probe_me_load_fails_token_dead():
     with patch.object(runner, "load_api_client", side_effect=_boom):
         result = await runner._probe_me("u1")
     assert result == "token_dead"
+
+
+async def test_probe_me_forbidden_banned():
+    from unittest.mock import AsyncMock, MagicMock
+    from app.hh import errors as hh_errors
+    from app.worker import runner
+
+    client = MagicMock()
+    client.access_token = "tok"
+    resp = type("R", (), {"status_code": 403, "request": None, "headers": {}})()
+    client.get.side_effect = hh_errors.Forbidden(
+        resp, {"errors": [{"type": "auth", "value": "account_blocked"}]}
+    )
+
+    with (
+        patch.object(runner, "load_api_client", return_value=client),
+        patch.object(runner, "persist_if_refreshed"),
+        patch.object(runner, "mark_invalid", new=AsyncMock()) as mi,
+    ):
+        result = await runner._probe_me("u1")
+    assert result == "banned"
+    mi.assert_awaited_once()

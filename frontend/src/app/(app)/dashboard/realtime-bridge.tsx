@@ -11,6 +11,7 @@ const TYPE_KIND: Record<string, ToastKind> = {
   limit_reached: "warning",
   worker_stop: "info",
   token_dead: "error",
+  account_banned: "error",
   resume_missing: "error",
 };
 
@@ -20,6 +21,7 @@ const TYPE_TITLE: Record<string, string> = {
   limit_reached: "Достигнут дневной лимит",
   worker_stop: "Worker остановлен",
   token_dead: "Токен hh умер — переподключи аккаунт",
+  account_banned: "Аккаунт hh заблокирован",
   resume_missing: "Резюме недоступно",
 };
 
