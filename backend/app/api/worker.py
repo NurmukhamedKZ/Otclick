@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_active_plan
 from app.worker.queue import get_user_queue
 from app.worker.runner import get_registry
 
@@ -32,7 +32,7 @@ class StatusResponse(BaseModel):
 
 
 @router.post("/start", response_model=StartResponse)
-async def start_worker(user_id: str = Depends(get_current_user)) -> StartResponse:
+async def start_worker(user_id: str = Depends(require_active_plan)) -> StartResponse:
     handle = await get_registry().start(user_id)
     return StartResponse(state=handle.state, queued=get_user_queue(user_id).qsize())
 

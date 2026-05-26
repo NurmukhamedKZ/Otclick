@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { StatusDot } from "@/components/otclick/ui";
 
 export type ToastKind = "info" | "success" | "warning" | "error";
 
@@ -23,11 +24,11 @@ type ToastInternal = Required<Pick<ToastPayload, "id" | "kind" | "title" | "dura
   body?: string;
 };
 
-const KIND_STYLE: Record<ToastKind, string> = {
-  info: "border-gray-300 bg-white",
-  success: "border-green-300 bg-green-50",
-  warning: "border-yellow-300 bg-yellow-50",
-  error: "border-red-300 bg-red-50",
+const KIND_DOT: Record<ToastKind, "ok" | "warn" | "err" | "muted"> = {
+  info: "muted",
+  success: "ok",
+  warning: "warn",
+  error: "err",
 };
 
 export default function Toaster() {
@@ -63,23 +64,55 @@ export default function Toaster() {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="pointer-events-none fixed top-4 right-4 z-50 flex w-80 flex-col gap-2">
+    <div
+      style={{
+        position: "fixed",
+        top: 20,
+        right: 20,
+        zIndex: 70,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        pointerEvents: "none",
+      }}
+    >
       {toasts.map((t) => (
         <div
           key={t.id}
-          className={`pointer-events-auto rounded border p-3 shadow-sm ${KIND_STYLE[t.kind]}`}
+          style={{
+            background: "var(--ink)",
+            color: "#F5F1E6",
+            padding: "12px 16px",
+            borderRadius: 14,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+            animation: "oc-slidein .3s cubic-bezier(.2,.8,.2,1)",
+            minWidth: 280,
+            maxWidth: 380,
+            pointerEvents: "auto",
+          }}
         >
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-sm font-medium text-gray-900">{t.title}</p>
-            <button
-              onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
-              className="text-xs text-gray-400 hover:text-gray-700"
-              aria-label="dismiss"
-            >
-              ✕
-            </button>
+          <StatusDot tone={KIND_DOT[t.kind]} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{t.title}</div>
+            {t.body && <div style={{ fontSize: 12, color: "#ffffff80", marginTop: 2 }}>{t.body}</div>}
           </div>
-          {t.body && <p className="mt-1 text-xs text-gray-600">{t.body}</p>}
+          <button
+            type="button"
+            onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+            aria-label="dismiss"
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "#ffffff80",
+              cursor: "pointer",
+              fontSize: 14,
+            }}
+          >
+            ✕
+          </button>
         </div>
       ))}
     </div>

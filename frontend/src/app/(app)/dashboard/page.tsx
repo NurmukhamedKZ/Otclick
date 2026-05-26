@@ -1,13 +1,19 @@
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { SlidersHorizontal } from "lucide-react";
-import HHStatusBanner from "./hh-status-banner";
+import Topbar from "@/components/otclick/topbar";
+import HHBanner from "@/components/otclick/hh-banner";
+import TodayResultsCard from "./today-results-card";
+import ActivityCalendar from "./activity-calendar";
+import LimitRing from "./limit-ring";
+import WeeklyPlan from "./weekly-plan";
+import QuickActions from "./quick-actions";
+import RecentApplicationsCard from "./recent-applications-card";
 import ResumesCard from "./resumes-card";
 import NotificationsCard from "./notifications-card";
-import RecentApplicationsCard from "./recent-applications-card";
-import FiltersTriggerButton from "./filters-trigger-button";
-import { Card, CardHeader } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+
+function greetingFor(email: string | null): string {
+  const name = email ? email.split("@")[0].split(/[._-]/)[0] : "там";
+  return `Привет, ${name[0]?.toUpperCase() ?? ""}${name.slice(1)}`;
+}
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -16,39 +22,48 @@ export default async function DashboardPage() {
   } = await supabase.auth.getUser();
 
   return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold tracking-tight">Дашборд</h1>
-        <p className="text-sm text-gray-500">{user?.email ?? user?.id}</p>
-      </header>
-
-      <HHStatusBanner />
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <ResumesCard />
-        <Card>
-          <CardHeader title="Быстрые действия" />
-          <div className="flex flex-wrap gap-2">
-            <FiltersTriggerButton>
-              <SlidersHorizontal size={14} />
-              Фильтры
-            </FiltersTriggerButton>
-            <Link href="/applications">
-              <Button variant="secondary">Все отклики →</Button>
-            </Link>
-            <Link href="/account">
-              <Button variant="secondary">Аккаунт →</Button>
-            </Link>
-          </div>
-          <p className="mt-3 text-xs text-gray-500">
-            Нажми «Старт» в верхней панели — worker начнёт обходить твои фильтры
-            и отправлять отклики с AI-сопроводительными.
-          </p>
-        </Card>
+    <>
+      <Topbar
+        greeting={greetingFor(user?.email ?? null)}
+        subtitle="Посмотрим, что бот сделал за тебя сегодня"
+      />
+      <HHBanner />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.45fr) minmax(0, 1fr)",
+          gap: 18,
+        }}
+      >
+        <TodayResultsCard />
+        <ActivityCalendar />
       </div>
-
-      <RecentApplicationsCard />
-      <NotificationsCard />
-    </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
+          gap: 18,
+          marginTop: 18,
+        }}
+      >
+        <LimitRing />
+        <WeeklyPlan />
+        <QuickActions />
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.45fr) minmax(0, 1fr)",
+          gap: 18,
+          marginTop: 18,
+        }}
+      >
+        <RecentApplicationsCard />
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <ResumesCard />
+          <NotificationsCard />
+        </div>
+      </div>
+    </>
   );
 }

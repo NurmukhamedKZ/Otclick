@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
 import type { CaptchaRequest } from "@/lib/types";
+import { Btn, Card } from "@/components/otclick/ui";
+import { IClose, IExternal, IShield } from "@/components/otclick/icons";
 
 const SCREENSHOT_BUCKET = "captcha-screenshots";
 
@@ -91,7 +93,7 @@ export default function CaptchaModal() {
     try {
       await apiFetch(`/api/captcha/${pending.id}/solve`, { method: "POST" });
     } catch {
-      /* re-check is best-effort; the 5s auto-poll will still fire */
+      /* best-effort */
     }
   }
 
@@ -103,59 +105,141 @@ export default function CaptchaModal() {
     try {
       await apiFetch(`/api/captcha/${id}/dismiss`, { method: "POST" });
     } catch {
-      /* worker stop is best-effort */
+      /* best-effort */
     }
   }
 
   if (!pending) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-        <h2 className="mb-2 text-lg font-semibold">Капча на hh</h2>
-        <p className="mb-3 text-sm text-gray-700">
-          hh попросил подтвердить, что ты человек. Открой ссылку, реши капчу — worker сам подхватит.
-        </p>
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(26,27,31,0.5)",
+        backdropFilter: "blur(4px)",
+        zIndex: 60,
+        display: "grid",
+        placeItems: "center",
+        padding: 20,
+        animation: "oc-fadein .2s ease",
+      }}
+    >
+      <Card tone="light" style={{ width: "min(440px, 100%)", padding: 28, position: "relative" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 14, marginBottom: 18 }}>
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 14,
+              flexShrink: 0,
+              background: "var(--coral-soft)",
+              color: "var(--coral)",
+              display: "grid",
+              placeItems: "center",
+            }}
+          >
+            <IShield size={20} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>hh просит решить капчу</div>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>
+              Бот поставлен на паузу. Реши капчу на hh — worker подхватит сам.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleDismiss}
+            aria-label="close"
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 10,
+              border: "none",
+              background: "var(--bg-deep)",
+              display: "grid",
+              placeItems: "center",
+              cursor: "pointer",
+              color: "var(--ink)",
+            }}
+          >
+            <IClose size={16} />
+          </button>
+        </div>
 
-        {imageUrl && (
+        {imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={imageUrl}
             alt="captcha screenshot"
-            className="mb-3 max-h-64 w-full rounded border border-gray-200 object-contain"
+            style={{
+              width: "100%",
+              maxHeight: 280,
+              objectFit: "contain",
+              borderRadius: 14,
+              border: "1px solid var(--line)",
+              marginBottom: 14,
+              background: "var(--bg-deep)",
+            }}
           />
+        ) : (
+          <div
+            style={{
+              height: 100,
+              borderRadius: 14,
+              background: "var(--bg-deep)",
+              display: "grid",
+              placeItems: "center",
+              marginBottom: 14,
+              color: "var(--muted)",
+              fontSize: 13,
+            }}
+          >
+            скриншот грузится…
+          </div>
         )}
 
-        <div className="flex flex-col gap-2">
+        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
           {pending.captcha_url && (
             <a
               href={pending.captcha_url}
               target="_blank"
               rel="noreferrer"
-              className="rounded bg-black px-3 py-2 text-center text-sm text-white hover:bg-gray-800"
+              style={{
+                background: "var(--ink)",
+                color: "#fff",
+                padding: "10px 16px",
+                borderRadius: 999,
+                fontSize: 14,
+                fontWeight: 600,
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
             >
-              Открыть на hh
+              открыть на hh <IExternal size={13} />
             </a>
           )}
-          <div className="flex gap-2">
-            <button
-              onClick={handleSolve}
-              className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
-            >
-              Я решил, проверить
-            </button>
-            <button
-              onClick={handleDismiss}
-              className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
-            >
-              Закрыть
-            </button>
-          </div>
+          <Btn kind="ghost" onClick={handleSolve}>
+            я решил, проверить
+          </Btn>
+          <Btn kind="ghost" onClick={handleDismiss}>
+            закрыть
+          </Btn>
         </div>
 
-        <p className="mt-3 text-xs text-gray-500">
-          Создано: {new Date(pending.created_at).toLocaleString()}
-        </p>
-      </div>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            fontSize: 11,
+            color: "var(--muted)",
+          }}
+        >
+          <span>создано {new Date(pending.created_at).toLocaleTimeString()}</span>
+        </div>
+      </Card>
     </div>
   );
 }

@@ -2,25 +2,51 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Card, CardHeader } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Empty } from "@/components/ui/empty";
-import { SkeletonList } from "@/components/ui/skeleton";
-import { STATUS_COLOR, STATUS_LABEL } from "@/lib/status";
 import type { Application } from "@/lib/types";
+import { Btn, Card, Tag } from "@/components/otclick/ui";
+import { IExternal, IRefresh, ISearch } from "@/components/otclick/icons";
+import Topbar from "@/components/otclick/topbar";
 
 const PAGE_SIZE = 25;
-const STATUSES = ["all", "queued", "sent", "failed", "captcha", "skipped", "form_required", "vacancy_gone"] as const;
+
+const STATUSES = [
+  { id: "all", label: "все", tone: "dark" as const },
+  { id: "sent", label: "отправленные", tone: "ok" as const },
+  { id: "captcha", label: "капча", tone: "coral" as const },
+  { id: "failed", label: "ошибки", tone: "err" as const },
+  { id: "skipped", label: "пропущенные", tone: "neutral" as const },
+  { id: "queued", label: "в очереди", tone: "neutral" as const },
+];
+
+const STATUS_TAG: Record<string, { tone: "ok" | "coral" | "err" | "neutral"; label: string }> = {
+  sent: { tone: "ok", label: "отправлено" },
+  captcha: { tone: "coral", label: "капча" },
+  failed: { tone: "err", label: "ошибка" },
+  skipped: { tone: "neutral", label: "пропуск" },
+  queued: { tone: "neutral", label: "очередь" },
+  form_required: { tone: "coral", label: "форма" },
+  vacancy_gone: { tone: "neutral", label: "удалена" },
+};
+
+function timeAgo(iso: string): string {
+  const diff = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 60) return `${diff} с`;
+  if (diff < 3600) return `${Math.round(diff / 60)} мин`;
+  if (diff < 86400) return `${Math.round(diff / 3600)} ч`;
+  return `${Math.round(diff / 86400)} дн`;
+}
 
 export default function ApplicationsPage() {
   const supabase = useMemo(() => createClient(), []);
   const [rows, setRows] = useState<Application[] | null>(null);
-  const [total, setTotal] = useState<number>(0);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [status, setStatus] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [searchDebounced, setSearchDebounced] = useState("");
+  const [spinning, setSpinning] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setSearchDebounced(search.trim()), 300);
@@ -52,9 +78,29 @@ export default function ApplicationsPage() {
     setError(null);
   }, [supabase, page, status, searchDebounced]);
 
+  const loadCounts = useCallback(async () => {
+    const next: Record<string, number> = {};
+    const { count: all } = await supabase
+      .from("applications")
+      .select("*", { count: "exact", head: true });
+    next.all = all ?? 0;
+    for (const s of STATUSES.filter((s) => s.id !== "all")) {
+      const { count } = await supabase
+        .from("applications")
+        .select("*", { count: "exact", head: true })
+        .eq("status", s.id);
+      next[s.id] = count ?? 0;
+    }
+    setCounts(next);
+  }, [supabase]);
+
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    loadCounts();
+  }, [loadCounts]);
 
   useEffect(() => {
     let cancelled = false;
@@ -72,6 +118,7 @@ export default function ApplicationsPage() {
           { event: "*", schema: "public", table: "applications", filter },
           () => {
             if (page === 0) load();
+            loadCounts();
           },
         )
         .subscribe();
@@ -80,132 +127,298 @@ export default function ApplicationsPage() {
       cancelled = true;
       if (channel) supabase.removeChannel(channel);
     };
-  }, [supabase, load, page]);
+  }, [supabase, load, loadCounts, page]);
+
+  function refresh() {
+    setSpinning(true);
+    load();
+    loadCounts();
+    setTimeout(() => setSpinning(false), 600);
+  }
 
   const pages = Math.ceil(total / PAGE_SIZE);
 
   return (
-    <div className="space-y-4">
-      <header className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Отклики</h1>
-          <p className="text-sm text-gray-500">{total} всего</p>
-        </div>
-      </header>
-
-      <Card>
-        <div className="mb-3 flex flex-col gap-2 sm:flex-row">
-          <select
-            value={status}
-            onChange={(e) => {
-              setStatus(e.target.value);
-              setPage(0);
+    <>
+      <Topbar greeting="Все отклики" subtitle={`${counts.all ?? total} всего`} />
+      <Card style={{ marginBottom: 18 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
+            marginBottom: 16,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ fontSize: 19, fontWeight: 700 }}>Все отклики</div>
+          <Tag tone="dark" dot>
+            realtime
+          </Tag>
+          <div style={{ flex: 1 }} />
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              background: "var(--bg-deep)",
+              borderRadius: 999,
+              padding: "8px 14px",
+              minWidth: 240,
             }}
-            className="rounded border border-gray-300 px-2 py-1.5 text-sm"
           >
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s === "all" ? "все статусы" : STATUS_LABEL[s] ?? s}
-              </option>
-            ))}
-          </select>
-          <input
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(0);
-            }}
-            placeholder="vacancy_id / employer_id…"
-            className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
-          />
-          <Button onClick={load} size="sm">
-            Refresh
-          </Button>
-        </div>
-
-        {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
-
-        {rows === null ? (
-          <SkeletonList rows={8} />
-        ) : rows.length === 0 ? (
-          <Empty
-            title="Откликов нет"
-            hint="Поменяй фильтр или запусти воркер сверху."
-          />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="border-b border-gray-200 text-xs uppercase tracking-wide text-gray-500">
-                <tr>
-                  <th className="py-2 text-left font-medium">статус</th>
-                  <th className="py-2 text-left font-medium">vacancy</th>
-                  <th className="py-2 text-left font-medium hidden md:table-cell">employer</th>
-                  <th className="py-2 text-left font-medium hidden md:table-cell">ошибка</th>
-                  <th className="py-2 text-right font-medium">когда</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {rows.map((a) => (
-                  <tr key={a.id} className="hover:bg-gray-50">
-                    <td className="py-2">
-                      <span
-                        className={`rounded px-2 py-0.5 text-xs ${
-                          STATUS_COLOR[a.status] ?? "bg-gray-100 text-gray-700"
-                        }`}
-                      >
-                        {STATUS_LABEL[a.status] ?? a.status}
-                      </span>
-                    </td>
-                    <td className="py-2">
-                      <a
-                        href={`https://hh.ru/vacancy/${a.vacancy_id}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-blue-700 hover:underline"
-                      >
-                        {a.vacancy_id}
-                      </a>
-                    </td>
-                    <td className="py-2 text-gray-600 hidden md:table-cell">
-                      {a.employer_id ?? "—"}
-                    </td>
-                    <td className="py-2 hidden max-w-[20rem] truncate text-xs text-red-600 md:table-cell">
-                      {a.error ?? ""}
-                    </td>
-                    <td className="py-2 whitespace-nowrap text-right text-xs text-gray-400">
-                      {new Date(a.created_at).toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <ISearch size={16} stroke="var(--muted)" />
+            <input
+              placeholder="vacancy_id, employer_id…"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(0);
+              }}
+              style={{
+                flex: 1,
+                border: "none",
+                outline: "none",
+                background: "transparent",
+                fontSize: 13,
+                fontFamily: "inherit",
+                color: "var(--ink)",
+                minWidth: 0,
+              }}
+            />
           </div>
-        )}
+          <Btn
+            kind="ghost"
+            size="sm"
+            icon={
+              <IRefresh
+                size={14}
+                style={spinning ? { animation: "oc-spin 0.6s linear infinite" } : undefined}
+              />
+            }
+            onClick={refresh}
+          >
+            обновить
+          </Btn>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {STATUSES.map((f) => (
+            <button
+              type="button"
+              key={f.id}
+              onClick={() => {
+                setStatus(f.id);
+                setPage(0);
+              }}
+              style={{
+                border: "none",
+                background: status === f.id ? "var(--ink)" : "var(--bg-deep)",
+                color: status === f.id ? "#F5F1E6" : "var(--ink)",
+                padding: "8px 14px",
+                borderRadius: 999,
+                fontSize: 13,
+                fontWeight: 600,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {f.label}
+              <span
+                className="mono"
+                style={{
+                  background: status === f.id ? "#ffffff15" : "#ffffff",
+                  padding: "2px 7px",
+                  borderRadius: 999,
+                  fontSize: 11,
+                }}
+              >
+                {counts[f.id] ?? 0}
+              </span>
+            </button>
+          ))}
+        </div>
+      </Card>
 
+      <Card style={{ padding: 0, overflow: "hidden" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "120px minmax(160px, 1fr) 160px minmax(140px, 1fr) 100px 60px",
+            gap: 14,
+            padding: "14px 22px",
+            fontSize: 11,
+            color: "var(--muted)",
+            textTransform: "uppercase",
+            letterSpacing: 0.5,
+            fontWeight: 600,
+            borderBottom: "1px solid var(--line-2)",
+          }}
+        >
+          <div>статус</div>
+          <div>вакансия</div>
+          <div>работодатель</div>
+          <div>комментарий</div>
+          <div>время</div>
+          <div></div>
+        </div>
+        {error && (
+          <p style={{ fontSize: 13, color: "var(--err)", padding: "12px 22px" }}>{error}</p>
+        )}
+        {rows === null ? (
+          <p style={{ fontSize: 13, color: "var(--muted)", padding: "22px" }}>загрузка…</p>
+        ) : rows.length === 0 ? (
+          <p style={{ fontSize: 13, color: "var(--muted)", padding: "22px" }}>
+            откликов нет
+          </p>
+        ) : (
+          rows.map((a, i) => {
+            const s = STATUS_TAG[a.status] ?? { tone: "neutral" as const, label: a.status };
+            return (
+              <div
+                key={a.id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "120px minmax(160px, 1fr) 160px minmax(140px, 1fr) 100px 60px",
+                  gap: 14,
+                  padding: "16px 22px",
+                  alignItems: "center",
+                  fontSize: 13,
+                  borderBottom: i < rows.length - 1 ? "1px solid var(--line-2)" : "none",
+                  transition: "background .15s",
+                }}
+                onMouseEnter={(e) =>
+                  ((e.currentTarget as HTMLDivElement).style.background = "var(--bg-deep)")
+                }
+                onMouseLeave={(e) =>
+                  ((e.currentTarget as HTMLDivElement).style.background = "transparent")
+                }
+              >
+                <Tag tone={s.tone} dot>
+                  {s.label}
+                </Tag>
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontWeight: 600,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    vacancy {a.vacancy_id}
+                  </div>
+                  {a.resume_id && (
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                      резюме {a.resume_id.slice(0, 8)}
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  <div
+                    style={{
+                      width: 26,
+                      height: 26,
+                      borderRadius: 8,
+                      background: "var(--bg-deep)",
+                      display: "grid",
+                      placeItems: "center",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {a.employer_id?.[0]?.toUpperCase() ?? "?"}
+                  </div>
+                  <span
+                    style={{
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {a.employer_id ?? "—"}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: a.error ? "var(--coral)" : "var(--muted)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {a.error || "—"}
+                </div>
+                <div className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>
+                  {timeAgo(a.created_at)} назад
+                </div>
+                <a
+                  href={`https://hh.ru/vacancy/${a.vacancy_id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "var(--ink)", display: "inline-flex" }}
+                >
+                  <IExternal size={15} />
+                </a>
+              </div>
+            );
+          })
+        )}
         {pages > 1 && (
-          <div className="mt-3 flex items-center justify-between text-xs text-gray-600">
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "14px 22px",
+              fontSize: 12,
+              color: "var(--muted)",
+              borderTop: "1px solid var(--line-2)",
+            }}
+          >
             <span>
-              Стр. {page + 1} / {pages}
+              стр. {page + 1} из {pages}
             </span>
-            <div className="flex gap-1">
-              <Button
-                size="sm"
-                disabled={page === 0}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button
+                type="button"
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={page === 0}
+                style={pagerBtn(false)}
               >
-                ←
-              </Button>
-              <Button
-                size="sm"
+                ‹
+              </button>
+              <button type="button" style={pagerBtn(true)}>{page + 1}</button>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}
                 disabled={page + 1 >= pages}
-                onClick={() => setPage((p) => p + 1)}
+                style={pagerBtn(false)}
               >
-                →
-              </Button>
+                ›
+              </button>
             </div>
           </div>
         )}
       </Card>
-    </div>
+    </>
   );
+}
+
+function pagerBtn(active: boolean): React.CSSProperties {
+  return {
+    padding: "6px 12px",
+    border: active ? "none" : "1px solid var(--line)",
+    background: active ? "var(--ink)" : "transparent",
+    color: active ? "#F5F1E6" : "var(--ink)",
+    borderRadius: 8,
+    fontWeight: 600,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: 13,
+  };
 }

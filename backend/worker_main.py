@@ -11,6 +11,7 @@ import logging
 import signal
 
 from app.db.supabase import service_client
+from app.services.plan import filter_accessible
 from app.worker.runner import get_registry
 
 logging.basicConfig(
@@ -43,6 +44,8 @@ async def main() -> None:
 
     registry = get_registry()
     users = await loop.run_in_executor(None, _load_active_users)
+    # Plan gating: skip users whose trial expired without an active subscription.
+    users = await loop.run_in_executor(None, filter_accessible, users)
     logger.info("spawning runners for %d users", len(users))
     for user_id in users:
         await registry.start(user_id)

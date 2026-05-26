@@ -3,14 +3,29 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Card, CardHeader } from "@/components/ui/card";
-import { Empty } from "@/components/ui/empty";
-import { SkeletonList } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
-import { STATUS_COLOR } from "@/lib/status";
 import type { Application } from "@/lib/types";
+import { Card, Tag } from "@/components/otclick/ui";
+import { IPlus } from "@/components/otclick/icons";
 
-const LIMIT = 10;
+const LIMIT = 8;
+
+const STATUS_TAG: Record<string, { tone: "ok" | "coral" | "err" | "neutral"; label: string }> = {
+  sent: { tone: "ok", label: "отправлено" },
+  captcha: { tone: "coral", label: "капча" },
+  failed: { tone: "err", label: "ошибка" },
+  skipped: { tone: "neutral", label: "пропуск" },
+  queued: { tone: "neutral", label: "очередь" },
+  form_required: { tone: "coral", label: "форма" },
+  vacancy_gone: { tone: "neutral", label: "удалена" },
+};
+
+function timeAgo(iso: string): string {
+  const diff = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 60) return `${diff} с`;
+  if (diff < 3600) return `${Math.round(diff / 60)} мин`;
+  if (diff < 86400) return `${Math.round(diff / 3600)} ч`;
+  return `${Math.round(diff / 86400)} дн`;
+}
 
 export default function RecentApplicationsCard() {
   const [rows, setRows] = useState<Application[] | null>(null);
@@ -34,7 +49,6 @@ export default function RecentApplicationsCard() {
   useEffect(() => {
     let cancelled = false;
     let channel: ReturnType<typeof supabase.channel> | null = null;
-
     (async () => {
       const {
         data: { user },
@@ -59,14 +73,11 @@ export default function RecentApplicationsCard() {
           { event: "UPDATE", schema: "public", table: "applications", filter },
           (payload) => {
             const row = payload.new as Application;
-            setRows((prev) =>
-              (prev ?? []).map((r) => (r.id === row.id ? row : r)),
-            );
+            setRows((prev) => (prev ?? []).map((r) => (r.id === row.id ? row : r)));
           },
         )
         .subscribe();
     })();
-
     return () => {
       cancelled = true;
       if (channel) supabase.removeChannel(channel);
@@ -75,49 +86,121 @@ export default function RecentApplicationsCard() {
 
   return (
     <Card>
-      <CardHeader
-        title="Последние отклики"
-        action={
-          <Link href="/applications">
-            <Button variant="ghost" size="sm">
-              Все →
-            </Button>
-          </Link>
-        }
-      />
-      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 16,
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 17, fontWeight: 700 }}>Последние отклики</div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+            обновляется в реальном времени
+          </div>
+        </div>
+        <Link href="/applications" style={{ textDecoration: "none" }}>
+          <span
+            style={{
+              background: "var(--ink)",
+              color: "#F5F1E6",
+              padding: "7px 14px",
+              borderRadius: 999,
+              fontSize: 13,
+              fontWeight: 600,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            все отклики <IPlus size={13} />
+          </span>
+        </Link>
+      </div>
+      {error && (
+        <p style={{ fontSize: 12, color: "var(--err)", marginBottom: 8 }}>{error}</p>
+      )}
       {rows === null ? (
-        <SkeletonList rows={5} />
+        <p style={{ color: "var(--muted)", fontSize: 13 }}>загрузка…</p>
       ) : rows.length === 0 ? (
-        <Empty
-          title="Пусто"
-          hint="Запусти worker сверху — отклики появятся здесь в реальном времени."
-        />
+        <p style={{ color: "var(--muted)", fontSize: 13 }}>
+          пусто — запусти worker сверху
+        </p>
       ) : (
-        <ul className="divide-y divide-gray-100 text-sm">
-          {rows.map((a) => (
-            <li key={a.id} className="flex items-center gap-3 py-2">
-              <span
-                className={`shrink-0 rounded px-2 py-0.5 text-xs ${
-                  STATUS_COLOR[a.status] ?? "bg-gray-100 text-gray-700"
-                }`}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {rows.map((a) => {
+            const s = STATUS_TAG[a.status] ?? { tone: "neutral" as const, label: a.status };
+            const initial = (a.employer_id ?? a.vacancy_id ?? "?")[0]?.toUpperCase() ?? "?";
+            return (
+              <div
+                key={a.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 14,
+                  padding: "12px 14px",
+                  borderRadius: 14,
+                  background: "var(--bg-deep)",
+                }}
               >
-                {a.status}
-              </span>
-              <a
-                href={`https://hh.ru/vacancy/${a.vacancy_id}`}
-                target="_blank"
-                rel="noreferrer"
-                className="flex-1 truncate text-blue-700 hover:underline"
-              >
-                vacancy {a.vacancy_id}
-              </a>
-              <span className="hidden whitespace-nowrap text-xs text-gray-400 sm:inline">
-                {new Date(a.created_at).toLocaleTimeString()}
-              </span>
-            </li>
-          ))}
-        </ul>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 12,
+                    background: "#fff",
+                    color: "var(--ink)",
+                    display: "grid",
+                    placeItems: "center",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    border: "1px solid var(--line)",
+                    flexShrink: 0,
+                  }}
+                >
+                  {initial}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <a
+                    href={`https://hh.ru/vacancy/${a.vacancy_id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: "var(--ink)",
+                      textDecoration: "none",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      display: "block",
+                    }}
+                  >
+                    vacancy {a.vacancy_id}
+                  </a>
+                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                    employer {a.employer_id ?? "—"}
+                    {a.error ? ` · ${a.error}` : ""}
+                  </div>
+                </div>
+                <Tag tone={s.tone} dot>
+                  {s.label}
+                </Tag>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--muted)",
+                    minWidth: 42,
+                    textAlign: "right",
+                  }}
+                >
+                  {timeAgo(a.created_at)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       )}
     </Card>
   );

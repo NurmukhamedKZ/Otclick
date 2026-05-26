@@ -1,13 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import type { Resume, ResumesList } from "@/lib/types";
-import { Card, CardHeader } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Empty } from "@/components/ui/empty";
-import { SkeletonList } from "@/components/ui/skeleton";
+import { Btn, Card, Tag } from "@/components/otclick/ui";
+import { IDoc, IRefresh } from "@/components/otclick/icons";
+import { pushToast } from "@/components/toaster";
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return "—";
+  const diff = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 60) return `${diff} с назад`;
+  if (diff < 3600) return `${Math.round(diff / 60)} мин назад`;
+  if (diff < 86400) return `${Math.round(diff / 3600)} ч назад`;
+  return `${Math.round(diff / 86400)} дн назад`;
+}
 
 export default function ResumesCard() {
   const [items, setItems] = useState<Resume[] | null>(null);
@@ -31,10 +38,9 @@ export default function ResumesCard() {
     setSyncing(true);
     setError(null);
     try {
-      const data = await apiFetch<ResumesList>("/api/resumes/sync", {
-        method: "POST",
-      });
+      const data = await apiFetch<ResumesList>("/api/resumes/sync", { method: "POST" });
       setItems(data.items);
+      pushToast({ kind: "success", title: "резюме синхронизированы" });
     } catch (e) {
       setError(e instanceof Error ? e.message : "sync failed");
     } finally {
@@ -44,40 +50,86 @@ export default function ResumesCard() {
 
   return (
     <Card>
-      <CardHeader
-        title="Резюме"
-        action={
-          <Button onClick={sync} disabled={syncing} size="sm">
-            <RefreshCw size={12} className={syncing ? "animate-spin" : ""} />
-            {syncing ? "Синк…" : "Sync hh"}
-          </Button>
-        }
-      />
-      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 14,
+        }}
+      >
+        <div style={{ fontSize: 17, fontWeight: 700 }}>Мои резюме</div>
+        <Btn kind="soft" size="sm" icon={<IRefresh size={14} />} onClick={sync} disabled={syncing}>
+          {syncing ? "синк…" : "синхронизировать"}
+        </Btn>
+      </div>
+      {error && (
+        <p style={{ fontSize: 12, color: "var(--err)", marginBottom: 8 }}>{error}</p>
+      )}
       {items === null ? (
-        <SkeletonList rows={3} />
+        <p style={{ color: "var(--muted)", fontSize: 13 }}>загрузка…</p>
       ) : items.length === 0 ? (
-        <Empty
-          title="Резюме не найдены"
-          hint="Нажми Sync — подтянем из hh."
-        />
+        <p style={{ color: "var(--muted)", fontSize: 13 }}>
+          резюме не найдены — нажми синхронизировать
+        </p>
       ) : (
-        <ul className="divide-y divide-gray-100 text-sm">
-          {items.map((r) => (
-            <li key={r.id} className="flex items-center justify-between py-2">
-              <span className="truncate">{r.title ?? r.hh_resume_id}</span>
-              <span
-                className={`shrink-0 rounded px-2 py-0.5 text-xs ${
-                  r.status === "published"
-                    ? "bg-green-100 text-green-800"
-                    : "bg-gray-100 text-gray-600"
-                }`}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {items.map((r) => {
+            const active = r.status === "published";
+            return (
+              <div
+                key={r.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 14,
+                  padding: "12px 14px",
+                  background: "var(--bg-deep)",
+                  borderRadius: 14,
+                }}
               >
-                {r.status ?? "—"}
-              </span>
-            </li>
-          ))}
-        </ul>
+                <div
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 12,
+                    flexShrink: 0,
+                    background: active ? "var(--ink)" : "transparent",
+                    color: active ? "#F5F1E6" : "var(--muted)",
+                    border: active ? "none" : "1px dashed var(--muted-2)",
+                    display: "grid",
+                    placeItems: "center",
+                  }}
+                >
+                  <IDoc size={16} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 600,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {r.title ?? r.hh_resume_id}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                    синхронизировано {timeAgo(r.synced_at)}
+                  </div>
+                </div>
+                {active ? (
+                  <Tag tone="dark" dot>
+                    активно
+                  </Tag>
+                ) : (
+                  <Tag tone="neutral">{r.status ?? "—"}</Tag>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
     </Card>
   );

@@ -33,4 +33,5 @@ class BillingStatusResponse(BaseModel):
     trial_ends: datetime | None = None
     plan_expires_at: datetime | None = None
     next_charge_at: datetime | None = None
+    has_access: bool = False  # plan currently grants worker access (trial/paid window)
     history: list[PaymentEntry]

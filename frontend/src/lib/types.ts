@@ -128,6 +128,7 @@ export type BillingStatus = {
   trial_ends: string | null;
   plan_expires_at: string | null;
   next_charge_at: string | null;
+  has_access: boolean;
   history: PaymentEntry[];
 };
 

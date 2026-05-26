@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.config import settings
 from app.db.supabase import service_client
+from app.services import plan as plan_service
 from app.schemas.billing import (
     BillingStatusResponse,
     PaymentEntry,
@@ -155,6 +156,7 @@ async def get_status(user_id: str) -> BillingStatusResponse:
         plan_expires_at=plan_expires,
         # Widget-recurrent: next charge ≈ end of current paid period.
         next_charge_at=plan_expires if (prof.get("plan") == "active") else None,
+        has_access=plan_service.has_access(prof),
         history=[PaymentEntry(**p) for p in (pay_res.data or [])],
     )
 

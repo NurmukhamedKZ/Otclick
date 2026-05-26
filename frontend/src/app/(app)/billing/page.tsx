@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
-import { Card, CardHeader } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Btn, Card, Tag } from "@/components/otclick/ui";
+import { IBolt, ICheck } from "@/components/otclick/icons";
+import Topbar from "@/components/otclick/topbar";
 import type { BillingStatus, SubscribeParams } from "@/lib/types";
+import { pushToast } from "@/components/toaster";
 
 const CP_SCRIPT = "https://widget.cloudpayments.ru/bundles/cloudpayments.js";
 
@@ -48,22 +50,29 @@ function loadWidgetScript(): Promise<void> {
 }
 
 function fmtDate(s: string | null): string {
-  return s ? new Date(s).toLocaleDateString() : "—";
+  return s ? new Date(s).toLocaleDateString("ru-RU") : "—";
 }
+
+const PERKS = [
+  "150 откликов / день",
+  "∞ фильтров",
+  "AI-сопроводительные",
+  "антибан + обход капчи",
+  "realtime уведомления",
+  "приоритетная поддержка",
+];
 
 export default function BillingPage() {
   const supabase = createClient();
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
     try {
       setStatus(await apiFetch<BillingStatus>("/api/billing/status"));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "status failed");
+      pushToast({ kind: "error", title: e instanceof Error ? e.message : "status failed" });
     }
   }, []);
 
@@ -74,12 +83,8 @@ export default function BillingPage() {
 
   async function subscribe() {
     setBusy(true);
-    setErr(null);
-    setMsg(null);
     try {
-      const p = await apiFetch<SubscribeParams>("/api/billing/subscribe", {
-        method: "POST",
-      });
+      const p = await apiFetch<SubscribeParams>("/api/billing/subscribe", { method: "POST" });
       await loadWidgetScript();
       if (!window.cp) throw new Error("CloudPayments widget unavailable");
       const widget = new window.cp.CloudPayments();
@@ -101,17 +106,16 @@ export default function BillingPage() {
         },
         {
           onSuccess: () => {
-            setMsg("Платёж принят. Подписка активируется в течение минуты.");
-            // Activation lands via webhook; re-poll a couple of times.
+            pushToast({ kind: "success", title: "платёж принят" });
             setTimeout(loadStatus, 3000);
             setTimeout(loadStatus, 10000);
           },
-          onFail: (reason) => setErr(`Платёж не прошёл: ${reason}`),
+          onFail: (reason) => pushToast({ kind: "error", title: `платёж не прошёл: ${reason}` }),
           onComplete: () => setBusy(false),
         },
       );
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "subscribe failed");
+      pushToast({ kind: "error", title: e instanceof Error ? e.message : "subscribe failed" });
       setBusy(false);
     }
   }
@@ -121,8 +125,9 @@ export default function BillingPage() {
     try {
       await apiFetch("/api/billing/cancel", { method: "POST" });
       await loadStatus();
+      pushToast({ kind: "info", title: "подписка отменена" });
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "cancel failed");
+      pushToast({ kind: "error", title: e instanceof Error ? e.message : "cancel failed" });
     }
   }
 
@@ -130,80 +135,142 @@ export default function BillingPage() {
   const isActive = plan === "active";
 
   return (
-    <div className="space-y-4">
-      <header>
-        <h1 className="text-2xl font-bold tracking-tight">Биллинг</h1>
-        <p className="text-sm text-gray-500">Тариф {plan}</p>
-      </header>
+    <>
+      <Topbar greeting="Биллинг" subtitle={`тариф ${plan}`} />
 
-      {err && <p className="text-sm text-red-600">{err}</p>}
-      {msg && <p className="text-sm text-green-700">{msg}</p>}
+      {status && !status.has_access && (
+        <div
+          style={{
+            background: "var(--coral-soft, #fde2dd)",
+            color: "var(--ink)",
+            borderRadius: 14,
+            padding: "12px 16px",
+            marginBottom: 18,
+            fontSize: 14,
+            fontWeight: 600,
+          }}
+        >
+          ⚠ Доступ неактивен — trial закончился или нет подписки. Worker не запустится, пока не оформите тариф.
+        </div>
+      )}
 
-      <Card>
-        <CardHeader title="Подписка" />
-        <dl className="grid grid-cols-[10rem_1fr] gap-y-2 text-sm">
-          <dt className="text-gray-500">Статус</dt>
-          <dd className={isActive ? "font-medium text-green-700" : ""}>{plan}</dd>
-          {status?.trial_ends && (
-            <>
-              <dt className="text-gray-500">Trial до</dt>
-              <dd>{fmtDate(status.trial_ends)}</dd>
-            </>
-          )}
+      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 18, marginBottom: 18 }}>
+        <Card tone="dark">
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: 18,
+            }}
+          >
+            <div>
+              <div className="serif" style={{ fontSize: 14, color: "var(--yellow)" }}>
+                otclick pro
+              </div>
+              <div style={{ fontSize: 32, fontWeight: 800, marginTop: 4 }}>999 ₽ / мес</div>
+            </div>
+            <Tag tone={isActive ? "ok" : "neutral"} dot>
+              {isActive ? "активна" : "не активна"}
+            </Tag>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {PERKS.map((p) => (
+              <div
+                key={p}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: 13,
+                  color: "#F5F1E6",
+                }}
+              >
+                <ICheck size={14} stroke="var(--yellow)" />
+                {p}
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 22, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {isActive ? (
+              <Btn kind="coral" size="md" onClick={cancel}>
+                отменить подписку
+              </Btn>
+            ) : (
+              <Btn kind="yellow" size="md" icon={<IBolt size={14} />} onClick={subscribe} disabled={busy}>
+                {busy ? "открываем…" : "оформить"}
+              </Btn>
+            )}
+          </div>
+        </Card>
+
+        <Card>
+          <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 14 }}>Статус</div>
+          <Row k="план" v={plan} />
+          {status?.trial_ends && <Row k="trial до" v={fmtDate(status.trial_ends)} />}
           {status?.plan_expires_at && (
-            <>
-              <dt className="text-gray-500">Действует до</dt>
-              <dd>{fmtDate(status.plan_expires_at)}</dd>
-            </>
+            <Row k="действует до" v={fmtDate(status.plan_expires_at)} />
           )}
           {status?.next_charge_at && (
-            <>
-              <dt className="text-gray-500">Следующее списание</dt>
-              <dd>{fmtDate(status.next_charge_at)}</dd>
-            </>
+            <Row k="следующее списание" v={fmtDate(status.next_charge_at)} />
           )}
-        </dl>
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          {isActive ? (
-            <Button variant="danger" size="sm" onClick={cancel}>
-              Отменить подписку
-            </Button>
-          ) : (
-            <Button variant="primary" onClick={subscribe} disabled={busy}>
-              {busy ? "Открываем…" : "Подписаться — 999 ₽/мес"}
-            </Button>
-          )}
-        </div>
-      </Card>
+        </Card>
+      </div>
 
       <Card>
-        <CardHeader title="История платежей" />
+        <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 14 }}>История платежей</div>
         {!status ? (
-          <p className="text-sm text-gray-500">Загрузка…</p>
+          <p style={{ color: "var(--muted)", fontSize: 13 }}>загрузка…</p>
         ) : status.history.length === 0 ? (
-          <p className="text-sm text-gray-500">Платежей пока нет.</p>
+          <p style={{ color: "var(--muted)", fontSize: 13 }}>платежей пока нет</p>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-gray-500">
-                <th className="py-1 font-medium">Дата</th>
-                <th className="py-1 font-medium">Сумма</th>
-                <th className="py-1 font-medium">Статус</th>
-              </tr>
-            </thead>
-            <tbody>
-              {status.history.map((p) => (
-                <tr key={p.provider_payment_id} className="border-t border-gray-100">
-                  <td className="py-1.5">{fmtDate(p.created_at)}</td>
-                  <td className="py-1.5">{p.amount ?? "—"} ₽</td>
-                  <td className="py-1.5">{p.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 100px 120px",
+                gap: 14,
+                padding: "8px 0",
+                fontSize: 11,
+                color: "var(--muted)",
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+                borderBottom: "1px solid var(--line-2)",
+              }}
+            >
+              <div>дата</div>
+              <div>сумма</div>
+              <div>статус</div>
+            </div>
+            {status.history.map((p) => (
+              <div
+                key={p.provider_payment_id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 100px 120px",
+                  gap: 14,
+                  padding: "12px 0",
+                  fontSize: 13,
+                  borderBottom: "1px solid var(--line-2)",
+                }}
+              >
+                <div>{fmtDate(p.created_at)}</div>
+                <div className="mono">{p.amount ?? "—"} ₽</div>
+                <div>{p.status}</div>
+              </div>
+            ))}
+          </div>
         )}
       </Card>
+    </>
+  );
+}
+
+function Row({ k, v }: { k: string; v: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", fontSize: 13 }}>
+      <span style={{ color: "var(--muted)" }}>{k}</span>
+      <span style={{ fontWeight: 600 }}>{v}</span>
     </div>
   );
 }

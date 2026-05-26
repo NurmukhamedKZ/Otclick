@@ -1,23 +1,71 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap');
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #EFEAE0;
+  --bg-deep: #E6E0D2;
+  --surface: #FFFFFF;
+  --ink: #1A1B1F;
+  --ink-soft: #2A2B30;
+  --muted: #8B867D;
+  --muted-2: #B5AFA2;
+  --line: #E4DFD2;
+  --line-2: #ECE7DA;
+  --yellow: #F5CB3D;
+  --yellow-soft: #FCE89B;
+  --coral: #E96B58;
+  --coral-soft: #F5B7AD;
+  --sage: #C7D4B6;
+  --sage-soft: #E3EAD7;
+  --ok: #4B8A5B;
+  --warn: #D08B2A;
+  --err: #C04A38;
+
+  --background: var(--bg);
+  --foreground: var(--ink);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-html {
-  color-scheme: light;
-}
+html { color-scheme: light; height: 100%; }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Manrope', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "ss02", "cv11";
+  position: relative;
 }
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image: radial-gradient(rgba(0,0,0,0.025) 1px, transparent 1px);
+  background-size: 3px 3px;
+  mix-blend-mode: multiply;
+  opacity: 0.5;
+}
+
+.mono { font-family: 'JetBrains Mono', monospace; font-feature-settings: "tnum", "zero"; }
+.serif { font-family: 'Instrument Serif', serif; font-style: italic; }
+
+::selection { background: var(--yellow); color: var(--ink); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--muted-2); }
+
+@keyframes oc-pulse {
+  0% { transform: scale(.8); opacity: .6; }
+  70% { transform: scale(1.4); opacity: 0; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+@keyframes oc-spin { to { transform: rotate(360deg); } }
+@keyframes oc-fadein { from { opacity: 0; } to { opacity: 1; } }
+@keyframes oc-slidein { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes oc-pop { 0% { transform: scale(.3); } 60% { transform: scale(1.1); } 100% { transform: scale(1); } }

@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Providers } from "@/lib/providers";
-import AppNav from "@/components/app-nav";
-import WorkerStatusBar from "@/components/worker-status-bar";
+import Sidebar from "@/components/otclick/sidebar";
+import WorkerBar from "@/components/otclick/worker-bar";
 import FiltersDrawer from "@/components/filters-drawer";
 import CaptchaModal from "@/components/captcha-modal";
 import Toaster from "@/components/toaster";
@@ -21,10 +21,19 @@ export default async function AppLayout({
 
   return (
     <Providers>
-      <div className="min-h-screen bg-gray-50">
-        <AppNav email={user.email ?? null} />
-        <WorkerStatusBar />
-        <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          padding: "16px 16px 16px 8px",
+          gap: 0,
+          position: "relative",
+          zIndex: 1,
+        }}
+      >
+        <Sidebar email={user.email ?? null} />
+        <main style={{ flex: 1, minWidth: 0, padding: "4px 12px 24px" }}>
+          <WorkerBar />
           {children}
         </main>
         <FiltersDrawer />
