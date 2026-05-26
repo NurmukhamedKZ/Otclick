@@ -1,0 +1,154 @@
+# Deploy
+
+Three pieces deploy independently:
+
+| Piece     | Where                     |
+|-----------|---------------------------|
+| Database  | Supabase (managed, already live) |
+| Frontend  | Vercel                    |
+| Backend + worker | Contabo VPS via Docker Compose |
+
+---
+
+## 1. Frontend → Vercel
+
+1. Push repo to GitHub.
+2. Vercel → Import Project → **Root Directory** = `frontend/`.
+3. Env vars:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `NEXT_PUBLIC_API_URL=https://api.yourdomain.com`
+4. Supabase dashboard → **Authentication → URL Configuration**:
+   - Site URL: `https://yourdomain.com`
+   - Redirect URLs: add `https://yourdomain.com/auth/callback`
+
+---
+
+## 2. Backend + worker → Contabo VPS (Ubuntu 24.04)
+
+### One-time host setup
+
+```bash
+# Docker
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER && newgrp docker
+
+# nginx + TLS
+sudo apt update && sudo apt install -y nginx certbot python3-certbot-nginx
+
+# App user + code
+sudo adduser --disabled-password --gecos "" app
+sudo -iu app git clone <your-repo> ~/app
+```
+
+### `~/app/backend/.env`
+
+Copy `backend/.env.example` and fill in. Critical vars:
+
+```
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+FERNET_KEY=                  # ⚠ back this up offline — losing it bricks all stored hh tokens
+OPENAI_API_KEY=
+CLOUDPAYMENTS_PUBLIC_ID=
+CLOUDPAYMENTS_API_SECRET=
+INTERNAL_CRON_TOKEN=         # random; used by the daily refresh cron
+CORS_ORIGINS=https://yourdomain.com
+```
+
+### Build & run
+
+```bash
+cd ~/app
+docker compose -f infra/docker-compose.yml up -d --build
+docker compose -f infra/docker-compose.yml ps
+docker compose -f infra/docker-compose.yml logs -f api worker
+```
+
+First build pulls Chromium (~1 GB) — ~5–10 min on Contabo.
+
+### nginx reverse proxy
+
+```bash
+sudo cp ~/app/infra/nginx.conf /etc/nginx/sites-available/api
+sudo sed -i 's/api.yourdomain.com/api.YOURDOMAIN.com/g' /etc/nginx/sites-available/api
+sudo ln -s /etc/nginx/sites-available/api /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d api.YOURDOMAIN.com
+```
+
+### Daily token refresh cron
+
+`crontab -e` as `app`:
+
+```cron
+0 4 * * * curl -fsS -X POST -H "X-Internal-Token: $(grep ^INTERNAL_CRON_TOKEN /home/app/app/backend/.env | cut -d= -f2)" https://api.YOURDOMAIN.com/internal/cron/refresh-tokens >> /home/app/refresh.log 2>&1
+```
+
+### DNS
+
+- `yourdomain.com` → Vercel (CNAME per Vercel docs)
+- `api.yourdomain.com` → VPS IPv4 (A record)
+
+### CloudPayments
+
+Dashboard → Pay URL = `https://api.yourdomain.com/api/webhooks/cloudpayments`.
+
+---
+
+## 3. Smoke test
+
+```bash
+curl https://api.YOURDOMAIN.com/health
+# → {"status":"ok", ...}
+```
+
+Then on the frontend: signup → onboarding → connect hh → start worker → an application should land in the dashboard within ~1 min.
+
+---
+
+## Operations
+
+### Update (after `git pull`)
+
+```bash
+cd ~/app && git pull
+docker compose -f infra/docker-compose.yml up -d --build
+```
+
+The worker restarts cleanly — `worker_main.py` traps `SIGTERM` and drains in-flight jobs.
+
+### Logs
+
+```bash
+docker compose -f infra/docker-compose.yml logs -f --tail=200 api
+docker compose -f infra/docker-compose.yml logs -f --tail=200 worker
+```
+
+### Rollback
+
+```bash
+git checkout <previous-sha>
+docker compose -f infra/docker-compose.yml up -d --build
+```
+
+(Or tag images per release and `docker compose up` with the old tag — recommended once you have a real release cadence.)
+
+### Watch memory
+
+Chromium leaks. If `docker stats` shows worker creeping past ~3 GB, restart it:
+
+```bash
+docker compose -f infra/docker-compose.yml restart worker
+```
+
+Add Sentry + a memory alert before public launch.
+
+---
+
+## ⚠ Critical
+
+- **Back up `FERNET_KEY`** somewhere offline (1Password, paper). Loss = every encrypted hh token in `hh_credentials` is unrecoverable; all users must re-onboard.
+- `.env` is gitignored — never commit. The compose file mounts it via `env_file:`, not as a baked-in image layer.
+- `127.0.0.1:8000` bind in compose means the API is only reachable through nginx — don't change to `0.0.0.0:8000` or you bypass TLS.

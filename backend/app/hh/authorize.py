@@ -18,9 +18,19 @@ from .client_keys import ANDROID_CLIENT_ID
 HH_OAUTH_AUTHORIZE = "https://hh.ru/oauth/authorize"
 HH_ANDROID_SCHEME = "hhandroid"
 
-SEL_LOGIN_INPUT = 'input[data-qa="login-input-username"]'
-SEL_EXPAND_PASSWORD = 'button:has-text("Войти с паролем")'
-SEL_PASSWORD_INPUT = 'input[data-qa="login-input-password"]'
+SEL_LOGIN_INPUT = 'input[data-qa="login-input-username"], input[name="login"], input[type="email"]'
+SEL_EXPAND_PASSWORD = (
+    'button:has-text("Войти с паролем"), '
+    'button:has-text("Войти по паролю"), '
+    'a:has-text("Войти с паролем"), '
+    'button[data-qa="expand-login-by-password"]'
+)
+SEL_PASSWORD_INPUT = (
+    'input[data-qa="applicant-login-input-password"], '
+    'input[data-qa="login-input-password"], '
+    'input[name="password"]:not([type="hidden"]), '
+    'input[type="password"]'
+)
 SEL_CAPTCHA_IMAGE = 'img[data-qa="account-captcha-picture"]'
 SEL_CAPTCHA_INPUT = 'input[data-qa="account-captcha-input"]'
 
@@ -64,12 +74,32 @@ async def get_auth_code(
             await page.wait_for_selector(SEL_LOGIN_INPUT, timeout=10000, state="visible")
             await page.fill(SEL_LOGIN_INPUT, username)
 
-            await page.wait_for_selector(SEL_EXPAND_PASSWORD, timeout=5000, state="visible")
-            await page.click(SEL_EXPAND_PASSWORD)
+            try:
+                await page.wait_for_selector(SEL_EXPAND_PASSWORD, timeout=5000, state="visible")
+                await page.click(SEL_EXPAND_PASSWORD)
+            except Exception:
+                pass  # password field may already be visible
 
             await _handle_captcha_if_present(page, on_captcha)
 
-            await page.wait_for_selector(SEL_PASSWORD_INPUT, timeout=10000, state="visible")
+            try:
+                await page.wait_for_selector(SEL_PASSWORD_INPUT, timeout=15000, state="visible")
+            except Exception:
+                try:
+                    import logging
+                    inputs = await page.evaluate(
+                        "Array.from(document.querySelectorAll('input,button'))"
+                        ".slice(0,40).map(e=>({tag:e.tagName,type:e.type,"
+                        "name:e.name,qa:e.getAttribute('data-qa'),"
+                        "text:(e.innerText||'').slice(0,40)}))"
+                    )
+                    logging.getLogger(__name__).error(
+                        "hh login: password field missing. URL=%s inputs=%s",
+                        page.url, inputs,
+                    )
+                except Exception:
+                    pass
+                raise
             await page.fill(SEL_PASSWORD_INPUT, password)
             await page.keyboard.press("Enter")
 

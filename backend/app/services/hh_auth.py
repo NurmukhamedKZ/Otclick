@@ -148,15 +148,17 @@ def _persist_credentials(user_id: str, access: str, refresh: str,
         "expires_at": datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat(),
         "hh_user_id": hh_user_id,
         "last_refreshed_at": now,
+        "invalid_at": None,
+        "invalid_reason": None,
     }).execute()
 
 
 def get_credentials_status(user_id: str) -> dict:
     res = service_client.table("hh_credentials").select(
-        "expires_at,last_refreshed_at,hh_user_id"
+        "expires_at,last_refreshed_at,hh_user_id,invalid_at"
     ).eq("user_id", user_id).maybe_single().execute()
     data = res.data if res else None
-    if not data:
+    if not data or data.get("invalid_at"):
         return {"connected": False}
     return {
         "connected": True,

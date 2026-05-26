@@ -1,0 +1,10 @@
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+.venv
+.env
+.env.local
+tests/
+poc_day1.py
+poc_day1_playwright.py
+scripts/
