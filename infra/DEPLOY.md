@@ -17,10 +17,11 @@ Three pieces deploy independently:
 3. Env vars:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `NEXT_PUBLIC_API_URL=https://api.yourdomain.com`
-4. Supabase dashboard → **Authentication → URL Configuration**:
-   - Site URL: `https://yourdomain.com`
-   - Redirect URLs: add `https://yourdomain.com/auth/callback`
+   - `NEXT_PUBLIC_API_URL=https://api.otclick.org`
+4. Vercel → Settings → Domains → add `otclick.org` (and `www.otclick.org`). Follow Vercel's DNS instructions (apex usually A `76.76.21.21`).
+5. Supabase dashboard → **Authentication → URL Configuration**:
+   - Site URL: `https://otclick.org`
+   - Redirect URLs: add `https://otclick.org/auth/callback`
 
 ---
 
@@ -54,7 +55,7 @@ OPENAI_API_KEY=
 CLOUDPAYMENTS_PUBLIC_ID=
 CLOUDPAYMENTS_API_SECRET=
 INTERNAL_CRON_TOKEN=         # random; used by the daily refresh cron
-CORS_ORIGINS=https://yourdomain.com
+CORS_ORIGINS=https://otclick.org,https://www.otclick.org
 ```
 
 ### Build & run
@@ -72,10 +73,10 @@ First build pulls Chromium (~1 GB) — ~5–10 min on Contabo.
 
 ```bash
 sudo cp ~/app/infra/nginx.conf /etc/nginx/sites-available/api
-sudo sed -i 's/api.yourdomain.com/api.YOURDOMAIN.com/g' /etc/nginx/sites-available/api
+sudo sed -i 's/api.yourdomain.com/api.otclick.org/g' /etc/nginx/sites-available/api
 sudo ln -s /etc/nginx/sites-available/api /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d api.YOURDOMAIN.com
+sudo certbot --nginx -d api.otclick.org
 ```
 
 ### Daily token refresh cron
@@ -83,24 +84,24 @@ sudo certbot --nginx -d api.YOURDOMAIN.com
 `crontab -e` as `app`:
 
 ```cron
-0 4 * * * curl -fsS -X POST -H "X-Internal-Token: $(grep ^INTERNAL_CRON_TOKEN /home/app/app/backend/.env | cut -d= -f2)" https://api.YOURDOMAIN.com/internal/cron/refresh-tokens >> /home/app/refresh.log 2>&1
+0 4 * * * curl -fsS -X POST -H "X-Internal-Token: $(grep ^INTERNAL_CRON_TOKEN /home/app/app/backend/.env | cut -d= -f2)" https://api.otclick.org/internal/cron/refresh-tokens >> /home/app/refresh.log 2>&1
 ```
 
 ### DNS
 
-- `yourdomain.com` → Vercel (CNAME per Vercel docs)
-- `api.yourdomain.com` → VPS IPv4 (A record)
+- `otclick.org` → Vercel (apex A `76.76.21.21`, or CNAME per Vercel docs)
+- `api.otclick.org` → VPS IPv4 (A record)
 
 ### CloudPayments
 
-Dashboard → Pay URL = `https://api.yourdomain.com/api/webhooks/cloudpayments`.
+Dashboard → Pay URL = `https://api.otclick.org/api/webhooks/cloudpayments`.
 
 ---
 
 ## 3. Smoke test
 
 ```bash
-curl https://api.YOURDOMAIN.com/health
+curl https://api.otclick.org/health
 # → {"status":"ok", ...}
 ```
 
