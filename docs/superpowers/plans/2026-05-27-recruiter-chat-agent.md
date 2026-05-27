@@ -747,9 +747,12 @@ git commit -m "feat: recruiter system prompt builder"
 - Create: `backend/app/ai/recruiter_tools.py`
 - Test: `backend/tests/test_recruiter_tools.py`
 
-The tools are exercised by directly invoking them with a `ToolRuntime` carrying a
-`RecruiterContext`. `tool`-decorated functions expose the underlying coroutine via
-`.ainvoke({...})`; tests inject context using the LangChain runtime.
+`ToolRuntime` cannot be constructed by hand (it needs `state`, `config`,
+`stream_writer`, `tool_call_id`, `store`) — it is injected by `create_agent` at
+runtime (verified: injection works via `ainvoke(..., context=RecruiterContext(...))`).
+So the tool bodies are thin adapters over plain async helpers `do_send` /
+`do_escalate` / `do_todo` that take a `RecruiterContext`. Unit tests exercise the
+helpers directly; the runtime injection path is covered end-to-end in Task 8.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -765,52 +768,6 @@ os.environ.setdefault("FERNET_KEY", "kPpDeJjFqDppkMm6QHzqFkkSgFwsKtGzh4WeZ5dKZHc
 from unittest.mock import MagicMock, patch
 import pytest
 
-from langchain.tools import ToolRuntime
-
-
-def _ctx(client=None):
-    from app.ai.recruiter_tools import RecruiterContext
-    return RecruiterContext(user_id="u1", negotiation_id="n9", message_id="m5",
-                            client=client or MagicMock(access_token="tok"))
-
-
-@pytest.mark.asyncio
-async def test_send_message_recruiter_posts_to_hh():
-    from app.ai import recruiter_tools as rt
-    ctx = _ctx()
-    out = await rt.send_message_recruiter.ainvoke(
-        {"message": "Зарплата от 300к", "runtime": ToolRuntime(context=ctx)}
-    )
-    ctx.client.post.assert_called_once_with("negotiations/n9/messages", {"message": "Зарплата от 300к"})
-    assert out == "sent"
-
-
-@pytest.mark.asyncio
-async def test_escalate_inserts_draft_and_notifies():
-    from app.ai import recruiter_tools as rt
-    with patch.object(rt.recruiter, "insert_draft", new=_spy()) as ins, \
-         patch.object(rt, "notify", new=_spy()) as notif:
-        out = await rt.escalate_to_human.ainvoke(
-            {"draft": "Давайте во вторник", "reason": "scheduling", "runtime": ToolRuntime(context=_ctx())}
-        )
-    assert ins.calls[0] == ("u1", "n9", "m5", "Давайте во вторник", "scheduling")
-    assert notif.calls[0][1] == "recruiter_draft"
-    assert out == "escalated"
-
-
-@pytest.mark.asyncio
-async def test_make_todo_inserts_and_notifies():
-    from app.ai import recruiter_tools as rt
-    with patch.object(rt.recruiter, "insert_todo", new=_spy()) as ins, \
-         patch.object(rt, "notify", new=_spy()) as notif:
-        out = await rt.make_todo.ainvoke(
-            {"title": "Заполнить форму", "detail": "до пятницы", "link": "https://forms.gle/x",
-             "runtime": ToolRuntime(context=_ctx())}
-        )
-    assert ins.calls[0] == ("u1", "n9", "m5", "Заполнить форму", "до пятницы", "https://forms.gle/x")
-    assert notif.calls[0][1] == "recruiter_todo"
-    assert out == "todo_created"
-
 
 class _Spy:
     def __init__(self):
@@ -820,15 +777,48 @@ class _Spy:
         return None
 
 
-def _spy():
-    return _Spy()
-```
+def _ctx(client=None):
+    from app.ai.recruiter_tools import RecruiterContext
+    return RecruiterContext(user_id="u1", negotiation_id="n9", message_id="m5",
+                            client=client or MagicMock(access_token="tok"))
 
-> If `ToolRuntime(context=...)` construction differs in langchain 1.3.2, fall back to
-> calling the underlying function via `rt.send_message_recruiter.func(...)` with a
-> hand-built `ToolRuntime`; confirm the exact constructor with
-> `.venv/bin/python -c "from langchain.tools import ToolRuntime; help(ToolRuntime)"`
-> during Step 2.
+
+@pytest.mark.asyncio
+async def test_do_send_posts_to_hh():
+    from app.ai import recruiter_tools as rt
+    ctx = _ctx()
+    out = await rt.do_send(ctx, "Зарплата от 300к")
+    ctx.client.post.assert_called_once_with("negotiations/n9/messages", {"message": "Зарплата от 300к"})
+    assert out == "sent"
+
+
+@pytest.mark.asyncio
+async def test_do_escalate_inserts_draft_and_notifies():
+    from app.ai import recruiter_tools as rt
+    ins, notif = _Spy(), _Spy()
+    with patch.object(rt.recruiter, "insert_draft", new=ins), patch.object(rt, "notify", new=notif):
+        out = await rt.do_escalate(_ctx(), "Давайте во вторник", "scheduling")
+    assert ins.calls[0] == ("u1", "n9", "m5", "Давайте во вторник", "scheduling")
+    assert notif.calls[0][1] == "recruiter_draft"
+    assert out == "escalated"
+
+
+@pytest.mark.asyncio
+async def test_do_todo_inserts_and_notifies():
+    from app.ai import recruiter_tools as rt
+    ins, notif = _Spy(), _Spy()
+    with patch.object(rt.recruiter, "insert_todo", new=ins), patch.object(rt, "notify", new=notif):
+        out = await rt.do_todo(_ctx(), "Заполнить форму", "до пятницы", "https://forms.gle/x")
+    assert ins.calls[0] == ("u1", "n9", "m5", "Заполнить форму", "до пятницы", "https://forms.gle/x")
+    assert notif.calls[0][1] == "recruiter_todo"
+    assert out == "todo_created"
+
+
+def test_recruiter_tools_list_has_three_tools():
+    from app.ai.recruiter_tools import RECRUITER_TOOLS
+    names = {t.name for t in RECRUITER_TOOLS}
+    assert names == {"send_message_recruiter", "escalate_to_human", "make_todo"}
+```
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -866,11 +856,9 @@ class RecruiterContext:
     client: ApiClient
 
 
-@tool
-async def send_message_recruiter(message: str, runtime: ToolRuntime[RecruiterContext]) -> str:
-    """Отправить ответ рекрутёру. Используй ТОЛЬКО когда вопрос закрытый и ответ
-    уже есть в резюме кандидата."""
-    ctx = runtime.context
+# --- side-effect helpers (testable without a ToolRuntime) --------------------
+
+async def do_send(ctx: RecruiterContext, message: str) -> str:
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(
         None,
@@ -879,14 +867,32 @@ async def send_message_recruiter(message: str, runtime: ToolRuntime[RecruiterCon
     return "sent"
 
 
+async def do_escalate(ctx: RecruiterContext, draft: str, reason: str) -> str:
+    await recruiter.insert_draft(ctx.user_id, ctx.negotiation_id, ctx.message_id, draft, reason)
+    await notify(ctx.user_id, "recruiter_draft", {"negotiation_id": ctx.negotiation_id})
+    return "escalated"
+
+
+async def do_todo(ctx: RecruiterContext, title: str, detail: str, link: str | None) -> str:
+    await recruiter.insert_todo(ctx.user_id, ctx.negotiation_id, ctx.message_id, title, detail, link)
+    await notify(ctx.user_id, "recruiter_todo", {"negotiation_id": ctx.negotiation_id, "title": title})
+    return "todo_created"
+
+
+# --- tools (thin adapters; runtime injected by create_agent) -----------------
+
+@tool
+async def send_message_recruiter(message: str, runtime: ToolRuntime[RecruiterContext]) -> str:
+    """Отправить ответ рекрутёру. Используй ТОЛЬКО когда вопрос закрытый и ответ
+    уже есть в резюме кандидата."""
+    return await do_send(runtime.context, message)
+
+
 @tool
 async def escalate_to_human(draft: str, reason: str, runtime: ToolRuntime[RecruiterContext]) -> str:
     """Сохранить предлагаемый ответ как черновик для подтверждения пользователем.
     Используй для всего неоднозначного: собеседования, запросы данных не из резюме."""
-    ctx = runtime.context
-    await recruiter.insert_draft(ctx.user_id, ctx.negotiation_id, ctx.message_id, draft, reason)
-    await notify(ctx.user_id, "recruiter_draft", {"negotiation_id": ctx.negotiation_id})
-    return "escalated"
+    return await do_escalate(runtime.context, draft, reason)
 
 
 @tool
@@ -894,10 +900,7 @@ async def make_todo(title: str, detail: str, link: str | None,
                     runtime: ToolRuntime[RecruiterContext]) -> str:
     """Создать задачу для действия ВНЕ hh — заполнить форму, написать в Telegram,
     позвонить. link — URL формы/профиля, если рекрутёр его дал, иначе None."""
-    ctx = runtime.context
-    await recruiter.insert_todo(ctx.user_id, ctx.negotiation_id, ctx.message_id, title, detail, link)
-    await notify(ctx.user_id, "recruiter_todo", {"negotiation_id": ctx.negotiation_id, "title": title})
-    return "todo_created"
+    return await do_todo(runtime.context, title, detail, link)
 
 
 RECRUITER_TOOLS = [send_message_recruiter, escalate_to_human, make_todo]
@@ -906,7 +909,7 @@ RECRUITER_TOOLS = [send_message_recruiter, escalate_to_human, make_todo]
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `cd backend && .venv/bin/python -m pytest tests/test_recruiter_tools.py -v`
-Expected: PASS (3 tests). If `ToolRuntime` constructor differs, adjust the test per the Step-1 note, then re-run.
+Expected: PASS (4 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -1000,13 +1003,18 @@ class HHAgent:
 
     def __init__(self, user_id: str) -> None:
         self.user_id = user_id
-        self.llm = ChatOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL,
-            model=settings.OPENAI_MODEL,
-            rate_limiter=InMemoryRateLimiter(
-                requests_per_second=settings.OPENAI_RATE_LIMIT / 60.0
-            ),
+        # ChatOpenAI raises without an api key; empty key → fallback paths use None.
+        self.llm = (
+            ChatOpenAI(
+                api_key=settings.OPENAI_API_KEY,
+                base_url=settings.OPENAI_BASE_URL,
+                model=settings.OPENAI_MODEL,
+                rate_limiter=InMemoryRateLimiter(
+                    requests_per_second=settings.OPENAI_RATE_LIMIT / 60.0
+                ),
+            )
+            if settings.OPENAI_API_KEY
+            else None
         )
         self._recruiter_agent = None
         self._resume_summary: str | None = None
