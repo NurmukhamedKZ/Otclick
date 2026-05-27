@@ -20,8 +20,6 @@ from typing import Literal
 from app.db.supabase import service_client
 from app.hh import errors as hh_errors
 from app.services import captcha as captcha_service
-from app.services import cover_letter as cover_letter_service
-from app.services.form_filler import FillerAgent
 from app.ai.agent import HHAgent
 from app.services.hh_credentials import (
     HHCredentialsInvalid,
@@ -183,7 +181,7 @@ def _extract_employer_id(vacancy: dict) -> str | None:
 
 
 async def apply_one(
-    user_id: str, resume_uuid: str, vacancy_id: str
+    user_id: str, resume_uuid: str, vacancy_id: str, agent: HHAgent
 ) -> ApplyStatus:
     loop = asyncio.get_running_loop()
     logger.info(
@@ -243,9 +241,9 @@ async def apply_one(
         # Has-test check survives the producer race: vacancy may have flipped
         # has_test=true between search and apply.
         if vacancy.get("has_test") is True:
-            # agent = FillerAgent(user_id, resume_uuid)
-            agent = HHAgent(user_id)  # TODO: switch to HHAgent after testing
-            fill_status = await agent.write_form_answers(vacancy, resume)
+            fill_status, form_answers = await agent.write_form_answers(
+                user_id, resume_uuid, vacancy
+            )
             logger.info(
                 "apply: vacancy=%s has_test=true → fill_status=%s",
                 vacancy_id, fill_status,
@@ -260,7 +258,7 @@ async def apply_one(
                     cover_letter=None,
                     error=None if fill_status == "form_sent" else "vacancy.has_test",
                     employer_id=employer_id,
-                    form_answers=agent.answers or None,
+                    form_answers=form_answers or None,
                 ),
             )
             return fill_status
@@ -269,7 +267,7 @@ async def apply_one(
         cover_letter = ""
         if letter_required:
             try:
-                cover_letter = await cover_letter_service.generate(
+                cover_letter = await agent.write_cover_letter(
                     user_id=user_id,
                     vacancy=vacancy,
                     resume=resume,

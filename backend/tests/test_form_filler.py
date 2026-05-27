@@ -168,8 +168,11 @@ async def test_fill_no_session_returns_form_required():
 
     fake = _fluent({"web_cookies_encrypted": None})
     with patch.object(form_filler, "service_client", fake):
-        agent = form_filler.FillerAgent("user-1")
-        assert await agent.fill({"id": "777"}) == "form_required"
+        status, answers = await form_filler.fill_form(
+            MagicMock(), "user-1", "r-uuid", {"id": "777"}
+        )
+    assert status == "form_required"
+    assert answers == []
 
 
 def test_solve_and_submit_collects_answers():

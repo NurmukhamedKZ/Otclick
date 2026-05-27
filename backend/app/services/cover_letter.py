@@ -1,7 +1,7 @@
 """Cover letter generator with Postgres cache.
 
 - Cache key: (vacancy_id, resume_id). Hit → skip OpenAI.
-- Miss → ChatOpenAI.complete; on failure → rand_text fallback template.
+- Miss → caller's llm.ainvoke; on failure → rand_text fallback template.
 - All writes via service_role (RLS deny-all on table).
 """
 
@@ -12,7 +12,9 @@ import logging
 import random
 import re
 
-from app.ai import ChatOpenAI, OpenAIError
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from app.config import settings
 from app.db.supabase import service_client
 
@@ -106,34 +108,18 @@ def _cache_put(
         logger.exception("cover_letter: cache write failed")
 
 
-_client_singleton: ChatOpenAI | None = None
-
-
-def _get_client() -> ChatOpenAI | None:
-    global _client_singleton
-    if not settings.OPENAI_API_KEY:
-        return None
-    if _client_singleton is None:
-        _client_singleton = ChatOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL,
-            model=settings.OPENAI_MODEL,
-            system_prompt=settings.COVER_LETTER_SYSTEM_PROMPT,
-            rate_limit=settings.OPENAI_RATE_LIMIT,
-            temperature=0.4,
-            max_completion_tokens=600,
-        )
-    return _client_singleton
-
-
 async def generate(
+    llm: BaseChatModel,
     *,
     user_id: str,
     vacancy: dict,
     resume: dict,
     resume_uuid: str,
 ) -> str:
-    """Return cover letter text. Hits cache, then OpenAI, then fallback."""
+    """Return cover letter text. Hits cache, then `llm`, then fallback template.
+
+    `llm` is the caller's shared HHAgent model — no client built here.
+    """
     loop = asyncio.get_running_loop()
     vacancy_id = str(vacancy.get("id") or "")
     if not vacancy_id:
@@ -146,24 +132,27 @@ async def generate(
         logger.debug("cover_letter: cache hit vacancy=%s", vacancy_id)
         return cached
 
-    client = _get_client()
     text: str | None = None
     source = "fallback"
     model: str | None = None
 
-    if client is not None:
+    if settings.OPENAI_API_KEY:
         prompt = _build_prompt(vacancy, resume)
         try:
-            text = await loop.run_in_executor(None, client.complete, prompt)
-            text = (text or "").strip()
+            resp = await llm.ainvoke([
+                SystemMessage(settings.COVER_LETTER_SYSTEM_PROMPT),
+                HumanMessage(prompt),
+            ])
+            content = resp.content
+            if isinstance(content, list):  # some models return content parts
+                content = " ".join(str(c) for c in content)
+            text = (content or "").strip() or None
             if text:
                 source = "ai"
                 model = settings.OPENAI_MODEL
-            else:
-                text = None
-        except OpenAIError as ex:
+        except Exception as ex:
             logger.warning(
-                "cover_letter: OpenAI failed for vacancy=%s: %s", vacancy_id, ex
+                "cover_letter: LLM failed for vacancy=%s: %s", vacancy_id, ex
             )
 
     if not text:

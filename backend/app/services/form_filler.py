@@ -10,7 +10,7 @@ import re
 from typing import Literal
 
 import requests
-from langchain_openai import ChatOpenAI
+from langchain_core.language_models import BaseChatModel
 
 from app.config import settings
 from app.db.supabase import service_client
@@ -126,25 +126,6 @@ async def load_resume(user_id: str, resume_row_id: str | None = None) -> dict:
 _TESTS_MARKER = ',"vacancyTests":'
 _COUNTERS_MARKER = ',"counters":'
 
-_chat_singleton: ChatOpenAI | None = None
-
-
-def _get_chat() -> ChatOpenAI | None:
-    """Lazy langchain chat client. None when no API key configured."""
-    global _chat_singleton
-    if not settings.OPENAI_API_KEY:
-        return None
-    if _chat_singleton is None:
-        base_url = settings.OPENAI_BASE_URL.removesuffix("/chat/completions")
-        _chat_singleton = ChatOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=base_url,
-            model=settings.OPENAI_MODEL,
-            temperature=1,
-            # max_tokens=400,
-        )
-    return _chat_singleton
-
 
 def _strip_tags(s: str | None) -> str:
     # Tags in the page JSON are entity-encoded (&lt;p&gt;) — unescape first.
@@ -152,8 +133,11 @@ def _strip_tags(s: str | None) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _ai_answer(chat: ChatOpenAI, prompt: str) -> str:
-    return (chat.invoke(prompt).content or "").strip()
+def _ai_answer(chat: BaseChatModel, prompt: str) -> str:
+    content = chat.invoke(prompt).content
+    if isinstance(content, list):  # some models return content parts
+        content = " ".join(str(c) for c in content)
+    return (content or "").strip()
 
 
 def _resume_summary(resume: dict) -> str:
@@ -189,7 +173,7 @@ def _parse_tests(page_html: str, vacancy_id: str) -> dict:
 
 
 def _choose_solution(
-    chat: ChatOpenAI | None, question: str, solutions: list, resume_ctx: str = ""
+    chat: BaseChatModel | None, question: str, solutions: list, resume_ctx: str = ""
 ) -> str:
     """Pick a candidate solution id for a multiple-choice task, grounded in resume."""
     if chat is not None:
@@ -219,7 +203,7 @@ def _choose_solution(
     return str(yes["id"]) if yes else str(solutions[len(solutions) // 2]["id"])
 
 
-def _free_text(chat: ChatOpenAI | None, question: str, resume_ctx: str = "") -> str:
+def _free_text(chat: BaseChatModel | None, question: str, resume_ctx: str = "") -> str:
     """Answer a free-text task, grounded in the candidate's resume."""
     if chat is not None:
         try:
@@ -241,7 +225,7 @@ def _solve_and_submit(
     session: requests.Session,
     vacancy: dict,
     hh_resume_id: str,
-    chat: ChatOpenAI | None,
+    chat: BaseChatModel | None,
     resume_ctx: str = "",
     letter: str = "",
 ) -> tuple[requests.Response, list[dict]]:
@@ -339,14 +323,19 @@ def _is_success(resp: requests.Response) -> bool:
     return True
 
 
-async def fill_form(user_id: str, resume_id: str, vacancy: dict) -> FillStatus:
+async def fill_form(
+    llm: BaseChatModel, user_id: str, resume_id: str, vacancy: dict
+) -> tuple[FillStatus, list[dict]]:
     """Solve a vacancy test and submit the application over the hh.ru web
     endpoint, reusing the stored web session (no browser, no re-login).
 
-    Returns "form_sent" on accepted submit (distinct from a plain auto
-    "sent" so the UI can flag test-solved applications), "form_required"
+    Answers are produced by `llm` (the caller's shared HHAgent model). Returns
+    (status, answers): "form_sent" on accepted submit (distinct from a plain
+    auto "sent" so the UI can flag test-solved applications), "form_required"
     otherwise (no stored session, no resume, fetch/parse failure, or hh
     rejected the answers) so the caller falls back to skip + manual handling.
+    `answers` is the per-task question/answer record for persistence (empty
+    when we bailed before solving).
     """
     vacancy_id = str(vacancy.get("id") or "")
     loop = asyncio.get_running_loop()
@@ -355,15 +344,16 @@ async def fill_form(user_id: str, resume_id: str, vacancy: dict) -> FillStatus:
         session = await load_web_session(user_id)
     except ValueError as ex:
         logger.warning("fill: no web session for user %s: %s", user_id, ex)
-        return "form_required"
+        return "form_required", []
 
     try:
         hh_resume_id = await _get_hh_resume_id(user_id, resume_id)
     except ValueError as ex:
         logger.warning("fill: %s", ex)
-        return "form_required"
+        return "form_required", []
 
-    chat = _get_chat()
+    # No API key → answer with fallbacks (None signals "no AI" to the helpers).
+    chat = llm if settings.OPENAI_API_KEY else None
     resume_ctx = ""
     if chat is not None:
         try:
@@ -380,13 +370,13 @@ async def fill_form(user_id: str, resume_id: str, vacancy: dict) -> FillStatus:
         )
     except Exception:
         logger.exception("fill: solve/submit failed for vacancy=%s", vacancy_id)
-        return "form_required"
+        return "form_required", []
 
     if _is_success(resp):
         logger.info("fill: test solved + submitted vacancy=%s", vacancy_id)
-        return "form_sent"
+        return "form_sent", answers
     logger.warning(
         "fill: submit not accepted vacancy=%s status=%s body=%.300s",
         vacancy_id, resp.status_code, resp.text,
     )
-    return "form_required"
+    return "form_required", answers

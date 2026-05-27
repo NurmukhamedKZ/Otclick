@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     PLAN_PERIOD: int = 1
 
     OPENAI_API_KEY: str = ""
-    OPENAI_BASE_URL: str = "https://api.openai.com/v1/chat/completions"
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-5.4-nano"
     OPENAI_RATE_LIMIT: int = 60
     COVER_LETTER_SYSTEM_PROMPT: str = (

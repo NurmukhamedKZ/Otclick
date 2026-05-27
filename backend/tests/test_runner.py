@@ -1,5 +1,5 @@
 import os
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon")
@@ -15,7 +15,7 @@ async def test_retry_once_on_transient_then_success():
 
     calls = []
 
-    async def fake_apply_one(user_id, resume_id, vacancy_id):
+    async def fake_apply_one(user_id, resume_id, vacancy_id, agent):
         calls.append(vacancy_id)
         if len(calls) == 1:
             raise req.ConnectionError("boom")
@@ -23,7 +23,7 @@ async def test_retry_once_on_transient_then_success():
 
     with patch.object(runner.apply_service, "apply_one", side_effect=fake_apply_one):
         job = ApplyJob(user_id="u1", resume_id="r1", vacancy_id="v1", filter_id=None)
-        status = await runner._maybe_apply_with_retry(job)
+        status = await runner._maybe_apply_with_retry(job, MagicMock())
 
     assert status == "sent"
     assert len(calls) == 2
@@ -36,14 +36,14 @@ async def test_no_retry_on_fatal():
 
     calls = []
 
-    async def fake_apply_one(user_id, resume_id, vacancy_id):
+    async def fake_apply_one(user_id, resume_id, vacancy_id, agent):
         calls.append(vacancy_id)
         resp = type("R", (), {"status_code": 400, "request": None, "headers": {}})()
         raise hh_errors.BadRequest(resp, {"description": "nope"})
 
     with patch.object(runner.apply_service, "apply_one", side_effect=fake_apply_one):
         job = ApplyJob(user_id="u1", resume_id="r1", vacancy_id="v1", filter_id=None)
-        status = await runner._maybe_apply_with_retry(job)
+        status = await runner._maybe_apply_with_retry(job, MagicMock())
 
     assert status == "failed"
     assert len(calls) == 1
@@ -57,13 +57,13 @@ async def test_retry_once_then_give_up():
 
     calls = []
 
-    async def fake_apply_one(user_id, resume_id, vacancy_id):
+    async def fake_apply_one(user_id, resume_id, vacancy_id, agent):
         calls.append(vacancy_id)
         raise req.Timeout("slow")
 
     with patch.object(runner.apply_service, "apply_one", side_effect=fake_apply_one):
         job = ApplyJob(user_id="u1", resume_id="r1", vacancy_id="v1", filter_id=None)
-        status = await runner._maybe_apply_with_retry(job)
+        status = await runner._maybe_apply_with_retry(job, MagicMock())
 
     assert status == "failed"
     assert len(calls) == 2

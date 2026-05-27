@@ -16,6 +16,7 @@ from typing import Literal
 
 import requests as _requests
 
+from app.ai.agent import HHAgent
 from app.hh import errors as hh_errors
 from app.services import apply as apply_service
 from app.services import captcha as captcha_service
@@ -51,6 +52,7 @@ class RunnerHandle:
     task: asyncio.Task | None = None
     captcha_event: asyncio.Event = field(default_factory=asyncio.Event)
     cluster: throttle.SessionCluster = field(default_factory=throttle.SessionCluster)
+    agent: HHAgent = field(default_factory=HHAgent)
     last_error: str | None = None
     skipped_has_test: int = 0
 
@@ -63,10 +65,12 @@ def _is_transient(ex: BaseException) -> bool:
     return False
 
 
-async def _maybe_apply_with_retry(job: ApplyJob) -> apply_service.ApplyStatus:
+async def _maybe_apply_with_retry(
+    job: ApplyJob, agent: HHAgent
+) -> apply_service.ApplyStatus:
     try:
         return await apply_service.apply_one(
-            job.user_id, job.resume_id, job.vacancy_id
+            job.user_id, job.resume_id, job.vacancy_id, agent
         )
     except Exception as ex:
         if not _is_transient(ex):
@@ -80,7 +84,7 @@ async def _maybe_apply_with_retry(job: ApplyJob) -> apply_service.ApplyStatus:
         )
     try:
         return await apply_service.apply_one(
-            job.user_id, job.resume_id, job.vacancy_id
+            job.user_id, job.resume_id, job.vacancy_id, agent
         )
     except Exception:
         logger.exception(
@@ -251,7 +255,7 @@ async def _run_loop(handle: RunnerHandle) -> None:
         )
         await asyncio.sleep(delay)
 
-        status = await _maybe_apply_with_retry(job)
+        status = await _maybe_apply_with_retry(job, handle.agent)
         logger.info(
             "runner: user=%s vacancy=%s status=%s", user_id, job.vacancy_id, status
         )

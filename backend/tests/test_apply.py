@@ -1,11 +1,19 @@
 import os
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service")
 os.environ.setdefault("FERNET_KEY", "kPpDeJjFqDppkMm6QHzqFkkSgFwsKtGzh4WeZ5dKZHc=")
+
+
+def _fake_agent(form=("form_sent", []), letter="GENERATED"):
+    """Stand-in HHAgent: form/cover-letter methods return canned values."""
+    agent = MagicMock()
+    agent.write_form_answers = AsyncMock(return_value=form)
+    agent.write_cover_letter = AsyncMock(return_value=letter)
+    return agent
 
 
 def _supabase_mock(resume_row, already_applied=False):
@@ -60,7 +68,7 @@ async def test_apply_one_sent_success():
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
     ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
 
     assert result == "sent"
     client.post.assert_called_once()
@@ -71,7 +79,7 @@ async def test_apply_one_resume_missing():
 
     sb, _, _ = _supabase_mock(None)
     with patch.object(apply_mod, "service_client", sb):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "resume_missing"
 
 
@@ -82,7 +90,7 @@ async def test_apply_one_skipped_already_applied_locally():
         {"id": "r-uuid", "hh_resume_id": "hh-r1"}, already_applied=True
     )
     with patch.object(apply_mod, "service_client", sb):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "skipped"
 
 
@@ -107,7 +115,7 @@ async def test_apply_one_captcha():
         patch.object(apply_mod, "persist_if_refreshed"),
         patch.object(apply_mod.captcha_service, "create_request", new=AsyncMock()) as create_req,
     ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "captcha"
     create_req.assert_awaited_once_with("u1", "https://hh.ru/cap.png")
 
@@ -130,7 +138,7 @@ async def test_apply_one_limit_exceeded():
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
     ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "limit_day"
 
 
@@ -158,7 +166,7 @@ async def test_apply_one_token_dead_on_forbidden():
         patch.object(apply_mod, "persist_if_refreshed"),
         patch.object(apply_mod, "mark_invalid", side_effect=fake_mark),
     ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "token_dead"
     assert mark_calls and mark_calls[0][0] == "u1"
 
@@ -176,7 +184,7 @@ async def test_apply_one_token_dead_when_creds_invalid():
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", side_effect=raise_invalid),
     ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "token_dead"
 
 
@@ -193,16 +201,14 @@ async def test_apply_one_form_required_on_has_test():
         "employer": {"id": "42"},
     }
 
-    async def fake_fill(self, vacancy):
-        return "form_required"
+    agent = _fake_agent(form=("form_required", []))
 
     with (
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
-        patch.object(apply_mod.FillerAgent, "fill", fake_fill),
     ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", agent)
     assert result == "form_required"
     client.post.assert_not_called()
 
@@ -220,16 +226,14 @@ async def test_apply_one_sent_when_filler_solves_test():
         "employer": {"id": "42"},
     }
 
-    async def fake_fill(self, vacancy):
-        return "form_sent"
+    agent = _fake_agent(form=("form_sent", [{"task_id": 1, "answer": "Да"}]))
 
     with (
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
-        patch.object(apply_mod.FillerAgent, "fill", fake_fill),
     ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", agent)
     assert result == "form_sent"
     # filler owns the submit — apply must NOT also POST /negotiations
     client.post.assert_not_called()
@@ -249,21 +253,16 @@ async def test_apply_one_skips_letter_when_not_required():
     }
     client.post.return_value = {}
 
-    gen_calls = []
-
-    async def fake_gen(**kwargs):
-        gen_calls.append(kwargs)
-        return "should not be called"
+    agent = _fake_agent()
 
     with (
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
-        patch.object(apply_mod.cover_letter_service, "generate", side_effect=fake_gen),
     ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", agent)
     assert result == "sent"
-    assert gen_calls == []
+    agent.write_cover_letter.assert_not_awaited()
     posted_params = client.post.call_args[0][1]
     assert "message" not in posted_params
 
@@ -283,16 +282,14 @@ async def test_apply_one_generates_letter_when_required():
     }
     client.post.return_value = {}
 
-    async def fake_gen(**kwargs):
-        return "GENERATED"
+    agent = _fake_agent(letter="GENERATED")
 
     with (
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
-        patch.object(apply_mod.cover_letter_service, "generate", side_effect=fake_gen),
     ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", agent)
     assert result == "sent"
     posted_params = client.post.call_args[0][1]
     assert posted_params["message"] == "GENERATED"
@@ -313,7 +310,7 @@ async def test_apply_one_vacancy_gone():
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
     ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "vacancy_gone"
     client.post.assert_not_called()
 
@@ -341,7 +338,7 @@ async def test_apply_one_form_required_on_hh_forbidden_marker():
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
     ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "form_required"
 
 
@@ -369,7 +366,7 @@ async def test_apply_one_account_banned_on_negotiations_forbidden():
         patch.object(apply_mod, "persist_if_refreshed"),
         patch.object(apply_mod, "mark_invalid", side_effect=fake_mark),
     ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "account_banned"
     assert mark_calls and "banned" in mark_calls[0][1].lower()
 
@@ -395,7 +392,7 @@ async def test_apply_one_account_banned_on_vacancy_fetch():
         patch.object(apply_mod, "persist_if_refreshed"),
         patch.object(apply_mod, "mark_invalid", side_effect=fake_mark),
     ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "account_banned"
     client.post.assert_not_called()
 
@@ -426,7 +423,7 @@ async def test_apply_one_resume_gone_on_hh_disables_filters():
             side_effect=lambda uid, ruid: disable_calls.append((uid, ruid)),
         ),
     ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "resume_missing"
     assert disable_calls == [("u1", "r-uuid")]
 
@@ -447,5 +444,5 @@ async def test_apply_one_failed_on_generic_client_error():
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
     ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "failed"
