@@ -185,6 +185,9 @@ export default function RecentApplicationsCard() {
                     {a.error ? ` · ${a.error}` : ""}
                   </div>
                 </div>
+                {(a.cover_letter ?? "").trim() && (
+                  <Tag tone="neutral">✎ AI</Tag>
+                )}
                 <Tag tone={s.tone} dot>
                   {s.label}
                 </Tag>

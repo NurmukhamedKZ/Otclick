@@ -280,6 +280,7 @@ export default function ApplicationsPage() {
           rows.map((a, i) => {
             const s = STATUS_TAG[a.status] ?? { tone: "neutral" as const, label: a.status };
             const qa = a.form_answers ?? [];
+            const letter = (a.cover_letter ?? "").trim();
             const open = openId === a.id;
             return (
               <Fragment key={a.id}>
@@ -340,6 +341,28 @@ export default function ApplicationsPage() {
                       }}
                     >
                       {open ? "▾" : "▸"} тест · {qa.length} вопр.
+                    </button>
+                  )}
+                  {qa.length === 0 && letter && (
+                    <button
+                      type="button"
+                      onClick={() => setOpenId(open ? null : a.id)}
+                      style={{
+                        marginTop: 4,
+                        border: "none",
+                        background: "transparent",
+                        padding: 0,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: "var(--coral)",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
+                    >
+                      {open ? "▾" : "▸"} AI письмо
                     </button>
                   )}
                 </div>
@@ -418,6 +441,26 @@ export default function ApplicationsPage() {
                       )}
                     </div>
                   ))}
+                </div>
+              )}
+              {open && qa.length === 0 && letter && (
+                <div
+                  style={{
+                    padding: "2px 22px 18px",
+                    background: "var(--bg-deep)",
+                    borderBottom: i < rows.length - 1 ? "1px solid var(--line-2)" : "none",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "var(--ink)",
+                      whiteSpace: "pre-wrap",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {letter}
+                  </div>
                 </div>
               )}
               </Fragment>
