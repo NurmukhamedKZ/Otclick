@@ -58,33 +58,6 @@ def _blacklisted_employer_ids(user_id: str, employer_ids: list[str]) -> set[str]
     return {r["employer_id"] for r in (res.data or [])}
 
 
-def _record_form_required(
-    *,
-    user_id: str,
-    resume_uuid: str,
-    vacancy_id: str,
-    employer_id: str | None,
-    vacancy_name: str | None,
-) -> None:
-    """Pre-record vacancies that need a form/test fill — surface in UI without
-    spending a hh apply attempt. UPSERT-safe; skip if already recorded."""
-    try:
-        service_client.table("applications").upsert(
-            {
-                "user_id": user_id,
-                "resume_id": resume_uuid,
-                "vacancy_id": vacancy_id,
-                "employer_id": employer_id,
-                "status": "form_required",
-                "error": "vacancy.has_test",
-            },
-            on_conflict="user_id,vacancy_id",
-            ignore_duplicates=True,
-        ).execute()
-    except Exception:  # pragma: no cover
-        logger.exception("producer: failed to pre-record form_required")
-
-
 def _matches_excluded(item: dict, pat: re.Pattern | None) -> bool:
     if not pat:
         return False
@@ -207,20 +180,10 @@ async def produce_jobs(user_id: str) -> tuple[int, int]:
                     if emp.get("id"):
                         relations_blacklist[str(emp["id"])] = emp.get("name")
                     continue
-                if it.get("has_test") is True:
-                    skipped_has_test += 1
-                    emp_id_raw = (it.get("employer") or {}).get("id")
-                    await loop.run_in_executor(
-                        None,
-                        lambda v=vid, e=emp_id_raw, n=it.get("name"): _record_form_required(
-                            user_id=user_id,
-                            resume_uuid=f["resume_id"],
-                            vacancy_id=v,
-                            employer_id=str(e) if e else None,
-                            vacancy_name=n,
-                        ),
-                    )
-                    continue
+                # has_test vacancies are NOT skipped — they fall through to the
+                # queue and apply_one solves the test via the web session
+                # (form_filler). It records form_sent on success, form_required
+                # on failure, without burning an API apply attempt.
                 emp_id = (it.get("employer") or {}).get("id")
                 if emp_id and str(emp_id) in blacklisted:
                     skipped_blacklist += 1

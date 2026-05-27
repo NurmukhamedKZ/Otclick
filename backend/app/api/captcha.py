@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from app.api.deps import get_current_user
 from app.services import captcha as captcha_service
-from app.worker.runner import get_registry
+from app.services import worker_control
 
 router = APIRouter(prefix="/api/captcha", tags=["captcha"])
 
@@ -33,8 +33,10 @@ async def pending(user_id: str = Depends(get_current_user)) -> list[dict]:
 async def solve(
     request_id: str, user_id: str = Depends(get_current_user)
 ) -> RecheckResponse:
-    rechecking = get_registry().resume_captcha(user_id)
-    return RecheckResponse(rechecking=rechecking)
+    # The runner (worker container) re-probes GET /me on its own poll cycle and
+    # resumes once hh lifts the captcha — this just clears the pending row.
+    await captcha_service.mark_solved(user_id)
+    return RecheckResponse(rechecking=True)
 
 
 @router.post("/{request_id}/dismiss", response_model=DismissResponse)
@@ -42,5 +44,6 @@ async def dismiss(
     request_id: str, user_id: str = Depends(get_current_user)
 ) -> DismissResponse:
     await captcha_service.mark_solved(user_id)
-    stopped = await get_registry().stop(user_id)
-    return DismissResponse(stopped=stopped)
+    # Stop the worker by flipping the persisted flag (worker_main reconciles).
+    await worker_control.set_enabled(user_id, False)
+    return DismissResponse(stopped=True)

@@ -28,7 +28,7 @@ async def poll_recruiter_chats(user_id: str, agent) -> None:
         try:
             data = await loop.run_in_executor(
                 None,
-                lambda: client.get("negotiations", order_by="updated", order="desc", per_page=50),
+                lambda: client.get("negotiations", order_by="updated_at", per_page=50),
             )
         except Exception:
             logger.warning("recruiter poll: list negotiations failed for %s", user_id, exc_info=True)

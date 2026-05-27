@@ -385,6 +385,14 @@ class WorkerRegistry:
             handle.state = "stopped"
         return handle
 
+    def running_user_ids(self) -> list[str]:
+        """Users with a live (not-done) runner task — for worker_main reconcile."""
+        return [
+            uid
+            for uid, h in self._handles.items()
+            if h.task is not None and not h.task.done()
+        ]
+
     def resume_captcha(self, user_id: str) -> bool:
         handle = self._handles.get(user_id)
         if not handle or handle.state != "paused_captcha":

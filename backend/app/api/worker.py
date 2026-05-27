@@ -6,8 +6,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.api.deps import get_current_user, require_active_plan
-from app.worker.queue import get_user_queue
-from app.worker.runner import get_registry
+from app.services import worker_control
 
 router = APIRouter(prefix="/api/worker", tags=["worker"])
 
@@ -31,16 +30,19 @@ class StatusResponse(BaseModel):
     skipped_has_test: int = 0
 
 
+# The runners live in the standalone worker container, not this process — the
+# dashboard only flips the persisted worker_enabled flag (worker_main reconciles
+# within its poll interval). Status is derived from the flag + DB counters.
 @router.post("/start", response_model=StartResponse)
 async def start_worker(user_id: str = Depends(require_active_plan)) -> StartResponse:
-    handle = await get_registry().start(user_id)
-    return StartResponse(state=handle.state, queued=get_user_queue(user_id).qsize())
+    await worker_control.set_enabled(user_id, True)
+    return StartResponse(state="running", queued=0)
 
 
 @router.post("/stop", response_model=StopResponse)
 async def stop_worker(user_id: str = Depends(get_current_user)) -> StopResponse:
-    stopped = await get_registry().stop(user_id)
-    return StopResponse(stopped=stopped)
+    await worker_control.set_enabled(user_id, False)
+    return StopResponse(stopped=True)
 
 
 @router.get("/status", response_model=StatusResponse)
@@ -56,24 +58,13 @@ async def worker_status(user_id: str = Depends(get_current_user)) -> StatusRespo
         return _read_day_count(user_id, _today_local(tz))
 
     db_today = await loop.run_in_executor(None, _today_count_db)
-    queued = get_user_queue(user_id).qsize()
+    enabled = await worker_control.is_enabled(user_id)
 
-    handle = get_registry().get(user_id)
-    if handle is None:
-        return StatusResponse(
-            state="stopped",
-            today_count=db_today,
-            daily_limit=DAILY_LIMIT,
-            queued=queued,
-            next_run_at=None,
-            last_error=None,
-        )
     return StatusResponse(
-        state=handle.state,
-        today_count=max(handle.today_count, db_today),
+        state="running" if enabled else "stopped",
+        today_count=db_today,
         daily_limit=DAILY_LIMIT,
-        queued=queued,
-        next_run_at=handle.next_run_at.isoformat() if handle.next_run_at else None,
-        last_error=handle.last_error,
-        skipped_has_test=handle.skipped_has_test,
+        queued=0,
+        next_run_at=None,
+        last_error=None,
     )
