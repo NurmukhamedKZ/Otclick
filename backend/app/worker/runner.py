@@ -28,6 +28,7 @@ from app.services.hh_credentials import (
 from app.services.notifications import notify
 from app.worker import limiter, throttle
 from app.worker.queue import ApplyJob, drop_user_queue, get_user_queue
+from app.worker.recruiter_poll import poll_recruiter_chats
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +53,13 @@ class RunnerHandle:
     task: asyncio.Task | None = None
     captcha_event: asyncio.Event = field(default_factory=asyncio.Event)
     cluster: throttle.SessionCluster = field(default_factory=throttle.SessionCluster)
-    agent: HHAgent = field(default_factory=HHAgent)
+    agent: HHAgent | None = None
     last_error: str | None = None
     skipped_has_test: int = 0
+
+    def __post_init__(self) -> None:
+        if self.agent is None:
+            self.agent = HHAgent(self.user_id)
 
 
 def _is_transient(ex: BaseException) -> bool:
@@ -231,6 +236,12 @@ async def _run_loop(handle: RunnerHandle) -> None:
                 )
                 await asyncio.sleep(IDLE_REFILL_SLEEP_S)
                 continue
+
+        # Recruiter chats — answer / escalate / todo for new employer messages.
+        try:
+            await poll_recruiter_chats(user_id, handle.agent)
+        except Exception:
+            logger.exception("recruiter poll failed for %s", user_id)
 
         # Session cluster break.
         if handle.cluster.should_break():
