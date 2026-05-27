@@ -339,67 +339,54 @@ def _is_success(resp: requests.Response) -> bool:
     return True
 
 
-class FillerAgent:
-    """Agent for filling forms based on resume content."""
+async def fill_form(user_id: str, resume_id: str, vacancy: dict) -> FillStatus:
+    """Solve a vacancy test and submit the application over the hh.ru web
+    endpoint, reusing the stored web session (no browser, no re-login).
 
-    def __init__(self, user_id: str, resume_row_id: str | None = None):
-        self.user_id = user_id
-        self.resume_row_id = resume_row_id
-        # Per-task questions + chosen answers from the last fill(), for persistence.
-        self.answers: list[dict] = []
+    Returns "form_sent" on accepted submit (distinct from a plain auto
+    "sent" so the UI can flag test-solved applications), "form_required"
+    otherwise (no stored session, no resume, fetch/parse failure, or hh
+    rejected the answers) so the caller falls back to skip + manual handling.
+    """
+    vacancy_id = str(vacancy.get("id") or "")
+    loop = asyncio.get_running_loop()
 
-    async def load_resume(self) -> dict:
-        """Load resume content for this agent."""
-        return await load_resume(self.user_id, self.resume_row_id)
-
-    async def fill(self, vacancy: dict) -> FillStatus:
-        """Solve a vacancy test and submit the application over the hh.ru web
-        endpoint, reusing the stored web session (no browser, no re-login).
-
-        Returns "form_sent" on accepted submit (distinct from a plain auto
-        "sent" so the UI can flag test-solved applications), "form_required"
-        otherwise (no stored session, no resume, fetch/parse failure, or hh
-        rejected the answers) so the caller falls back to skip + manual handling.
-        """
-        vacancy_id = str(vacancy.get("id") or "")
-        loop = asyncio.get_running_loop()
-
-        try:
-            session = await load_web_session(self.user_id)
-        except ValueError as ex:
-            logger.warning("fill: no web session for user %s: %s", self.user_id, ex)
-            return "form_required"
-
-        try:
-            hh_resume_id = await _get_hh_resume_id(self.user_id, self.resume_row_id)
-        except ValueError as ex:
-            logger.warning("fill: %s", ex)
-            return "form_required"
-
-        chat = _get_chat()
-        resume_ctx = ""
-        if chat is not None:
-            try:
-                resume = await load_resume(self.user_id, self.resume_row_id)
-                resume_ctx = _resume_summary(resume)
-            except Exception:
-                logger.warning(
-                    "fill: resume load failed — answers ungrounded", exc_info=True
-                )
-
-        try:
-            resp, self.answers = await loop.run_in_executor(
-                None, _solve_and_submit, session, vacancy, hh_resume_id, chat, resume_ctx
-            )
-        except Exception:
-            logger.exception("fill: solve/submit failed for vacancy=%s", vacancy_id)
-            return "form_required"
-
-        if _is_success(resp):
-            logger.info("fill: test solved + submitted vacancy=%s", vacancy_id)
-            return "form_sent"
-        logger.warning(
-            "fill: submit not accepted vacancy=%s status=%s body=%.300s",
-            vacancy_id, resp.status_code, resp.text,
-        )
+    try:
+        session = await load_web_session(user_id)
+    except ValueError as ex:
+        logger.warning("fill: no web session for user %s: %s", user_id, ex)
         return "form_required"
+
+    try:
+        hh_resume_id = await _get_hh_resume_id(user_id, resume_id)
+    except ValueError as ex:
+        logger.warning("fill: %s", ex)
+        return "form_required"
+
+    chat = _get_chat()
+    resume_ctx = ""
+    if chat is not None:
+        try:
+            resume = await load_resume(user_id, resume_id)
+            resume_ctx = _resume_summary(resume)
+        except Exception:
+            logger.warning(
+                "fill: resume load failed — answers ungrounded", exc_info=True
+            )
+
+    try:
+        resp, answers = await loop.run_in_executor(
+            None, _solve_and_submit, session, vacancy, hh_resume_id, chat, resume_ctx
+        )
+    except Exception:
+        logger.exception("fill: solve/submit failed for vacancy=%s", vacancy_id)
+        return "form_required"
+
+    if _is_success(resp):
+        logger.info("fill: test solved + submitted vacancy=%s", vacancy_id)
+        return "form_sent"
+    logger.warning(
+        "fill: submit not accepted vacancy=%s status=%s body=%.300s",
+        vacancy_id, resp.status_code, resp.text,
+    )
+    return "form_required"

@@ -22,6 +22,7 @@ from app.hh import errors as hh_errors
 from app.services import captcha as captcha_service
 from app.services import cover_letter as cover_letter_service
 from app.services.form_filler import FillerAgent
+from app.ai.agent import HHAgent
 from app.services.hh_credentials import (
     HHCredentialsInvalid,
     load_api_client,
@@ -242,8 +243,9 @@ async def apply_one(
         # Has-test check survives the producer race: vacancy may have flipped
         # has_test=true between search and apply.
         if vacancy.get("has_test") is True:
-            agent = FillerAgent(user_id, resume_uuid)
-            fill_status = await agent.fill(vacancy)
+            # agent = FillerAgent(user_id, resume_uuid)
+            agent = HHAgent(user_id)  # TODO: switch to HHAgent after testing
+            fill_status = await agent.write_form_answers(vacancy, resume)
             logger.info(
                 "apply: vacancy=%s has_test=true → fill_status=%s",
                 vacancy_id, fill_status,

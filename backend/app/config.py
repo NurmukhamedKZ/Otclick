@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1/chat/completions"
-    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_MODEL: str = "gpt-5.4-nano"
     OPENAI_RATE_LIMIT: int = 60
     COVER_LETTER_SYSTEM_PROMPT: str = (
         "Ты — кандидат на вакансию. Напиши сопроводительное письмо на русском, "

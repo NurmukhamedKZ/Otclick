@@ -1,0 +1,3 @@
+RECRUITOR_SYSTEM_PROMPT = """
+
+"""
