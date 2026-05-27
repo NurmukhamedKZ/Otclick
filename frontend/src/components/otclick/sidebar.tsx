@@ -8,6 +8,7 @@ import {
   IList,
   IFilter,
   IBell,
+  IMail,
   IUser,
   ISettings,
   ILogo,
@@ -20,6 +21,7 @@ type Item = { href?: string; id: string; icon: React.ReactNode; label: string; a
 const NAV: Item[] = [
   { id: "dashboard", href: "/dashboard", icon: <IHome />, label: "Главная" },
   { id: "applications", href: "/applications", icon: <IList />, label: "Отклики" },
+  { id: "recruiter", href: "/recruiter", icon: <IMail />, label: "Переписка" },
   { id: "filters", icon: <IFilter />, label: "Фильтры", action: "filters" },
   { id: "notifications", href: "/notifications", icon: <IBell />, label: "Уведомления" },
   { id: "account", href: "/account", icon: <IUser />, label: "Аккаунт" },

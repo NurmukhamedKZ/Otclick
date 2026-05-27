@@ -18,6 +18,8 @@ NotificationType = Literal[
     "token_dead",
     "account_banned",
     "resume_missing",
+    "recruiter_draft",
+    "recruiter_todo",
 ]
 
 

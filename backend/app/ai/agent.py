@@ -1,46 +1,48 @@
 """Central AI interface for hh automation.
 
-One HHAgent per worker runner. Wraps a single langchain ChatOpenAI (self.llm)
-shared by every AI path — form-test answers, cover letters, and the recruiter
-chat agent. No per-call LLM construction, no bypassed clients: callers route
-all completions through this class so rate-limiting and config live in one place.
+One HHAgent per worker runner (per user). Wraps a single langchain ChatOpenAI
+(self.llm) shared by every AI path — form-test answers, cover letters, and the
+recruiter chat agent. No per-call LLM construction.
 """
 
 from __future__ import annotations
+
+import logging
 
 from langchain.agents import create_agent
 from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 
-from app.ai.prompt import RECRUITER_SYSTEM_PROMPT
+from app.ai.prompt import build_recruiter_prompt
+from app.ai.recruiter_tools import RECRUITER_TOOLS, RecruiterContext
 from app.config import settings
 from app.services.cover_letter import generate as _generate_cover_letter
 from app.services.form_filler import FillStatus, fill_form
 
+logger = logging.getLogger(__name__)
+
 
 class HHAgent:
-    """Single entry point for all LLM work. Construct once per runner."""
+    """Single entry point for all LLM work. Construct once per runner/user."""
 
-    def __init__(self) -> None:
-        self.llm = ChatOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL,
-            model=settings.OPENAI_MODEL,
-            rate_limiter=InMemoryRateLimiter(
-                requests_per_second=settings.OPENAI_RATE_LIMIT / 60.0
-            ),
+    def __init__(self, user_id: str) -> None:
+        self.user_id = user_id
+        # ChatOpenAI raises without an api key; empty key → fallback paths use None.
+        self.llm = (
+            ChatOpenAI(
+                api_key=settings.OPENAI_API_KEY,
+                base_url=settings.OPENAI_BASE_URL,
+                model=settings.OPENAI_MODEL,
+                rate_limiter=InMemoryRateLimiter(
+                    requests_per_second=settings.OPENAI_RATE_LIMIT / 60.0
+                ),
+            )
+            if settings.OPENAI_API_KEY
+            else None
         )
-        self.agent = create_agent(
-            self.llm,
-            tools=self.get_tools(),
-            system_prompt=RECRUITER_SYSTEM_PROMPT,
-            checkpointer=InMemorySaver(),
-        )
-
-    def get_tools(self) -> list:
-        """Tools for the recruiter chat agent. None yet."""
-        return []
+        self._recruiter_agent = None
+        self._resume_summary: str | None = None
 
     async def write_form_answers(
         self, user_id: str, resume_id: str, vacancy: dict
@@ -60,10 +62,44 @@ class HHAgent:
             resume_uuid=resume_uuid,
         )
 
-    async def answer_recruiter(self, chat_id: str, question: str) -> str:
-        """Recruiter chat reply. Conversation memory keyed by chat_id."""
-        config = {"configurable": {"thread_id": chat_id}}
-        result = await self.agent.ainvoke(
-            {"messages": [("user", question)]}, config=config
+    async def _load_resume_summary(self) -> str:
+        if self._resume_summary is not None:
+            return self._resume_summary
+        from app.services.form_filler import _resume_summary, load_resume
+        try:
+            resume = await load_resume(self.user_id)
+            self._resume_summary = _resume_summary(resume)
+        except Exception:
+            logger.warning(
+                "recruiter: resume load failed for %s — ungrounded", self.user_id, exc_info=True
+            )
+            self._resume_summary = ""
+        return self._resume_summary
+
+    def _build_recruiter_agent(self, system_prompt: str):
+        return create_agent(
+            self.llm,
+            tools=RECRUITER_TOOLS,
+            system_prompt=system_prompt,
+            context_schema=RecruiterContext,
+            checkpointer=InMemorySaver(),
         )
-        return result["messages"][-1].content
+
+    async def answer_recruiter(
+        self, negotiation_id: str, message_id: str,
+        history: list[tuple[str, str]], client,
+    ) -> None:
+        """Decide + act on the latest recruiter message via tools (send/escalate/
+        todo) or no-op. Conversation memory keyed by negotiation_id."""
+        if not settings.OPENAI_API_KEY:
+            logger.info("recruiter: no OPENAI_API_KEY — skipping chat %s", negotiation_id)
+            return
+        if self._recruiter_agent is None:
+            summary = await self._load_resume_summary()
+            self._recruiter_agent = self._build_recruiter_agent(build_recruiter_prompt(summary))
+        ctx = RecruiterContext(self.user_id, negotiation_id, message_id, client)
+        await self._recruiter_agent.ainvoke(
+            {"messages": history},
+            config={"configurable": {"thread_id": negotiation_id}},
+            context=ctx,
+        )
