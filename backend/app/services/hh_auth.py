@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -98,7 +99,9 @@ async def _run_oauth(job_id: str, username: str, password: str) -> None:
             state.status = "running"
             return solution
 
-        code = await get_auth_code(username, password, on_captcha=on_captcha, headless=True)
+        code, cookies = await get_auth_code(
+            username, password, on_captcha=on_captcha, headless=True
+        )
 
         # Sync blocking HTTP calls (requests + time.sleep) — run in executor
         token = await loop.run_in_executor(None, _exchange_and_fetch_user, code)
@@ -111,6 +114,7 @@ async def _run_oauth(job_id: str, username: str, password: str) -> None:
             token["refresh_token"],
             token["access_expires_at"],
             token["hh_user_id"],
+            cookies,
         )
         state.status = "success"
     except Exception as ex:
@@ -139,9 +143,10 @@ def _exchange_and_fetch_user(code: str) -> dict:
 
 
 def _persist_credentials(user_id: str, access: str, refresh: str,
-                         expires_at: int, hh_user_id: str) -> None:
+                         expires_at: int, hh_user_id: str,
+                         web_cookies: list[dict] | None = None) -> None:
     now = datetime.now(timezone.utc).isoformat()
-    service_client.table("hh_credentials").upsert({
+    row = {
         "user_id": user_id,
         "access_token_encrypted": encrypt_token(access),
         "refresh_token_encrypted": encrypt_token(refresh),
@@ -150,7 +155,10 @@ def _persist_credentials(user_id: str, access: str, refresh: str,
         "last_refreshed_at": now,
         "invalid_at": None,
         "invalid_reason": None,
-    }).execute()
+    }
+    if web_cookies is not None:
+        row["web_cookies_encrypted"] = encrypt_token(json.dumps(web_cookies))
+    service_client.table("hh_credentials").upsert(row).execute()
 
 
 def get_credentials_status(user_id: str) -> dict:

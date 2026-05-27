@@ -30,7 +30,7 @@ from app.worker.queue import ApplyJob, drop_user_queue, get_user_queue
 
 logger = logging.getLogger(__name__)
 
-State = Literal["running", "paused_captcha", "paused_limit", "stopped"]
+State = Literal["runningы", "paused_captcha", "paused_limit", "stopped"]
 
 # Hour-limit cooldown when limiter says limit_hour.
 HOUR_COOLDOWN_S = 60 * 60 + 30
@@ -256,13 +256,17 @@ async def _run_loop(handle: RunnerHandle) -> None:
             "runner: user=%s vacancy=%s status=%s", user_id, job.vacancy_id, status
         )
 
-        if status == "sent":
+        if status in ("sent", "form_sent"):
             handle.today_count = await limiter.increment(user_id)
             handle.cluster.record_apply()
             await notify(
                 user_id,
                 "apply_success",
-                {"vacancy_id": job.vacancy_id, "today_count": handle.today_count},
+                {
+                    "vacancy_id": job.vacancy_id,
+                    "today_count": handle.today_count,
+                    "via": "form" if status == "form_sent" else "auto",
+                },
             )
         elif status == "captcha":
             handle.state = "paused_captcha"

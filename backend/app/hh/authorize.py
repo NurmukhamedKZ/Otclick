@@ -45,8 +45,12 @@ async def get_auth_code(
     password: str,
     on_captcha: Callable[[bytes], Awaitable[str]] | None = None,
     headless: bool = True,
-) -> str:
-    """Run Playwright OAuth flow → returns hh OAuth code.
+) -> tuple[str, list[dict]]:
+    """Run Playwright OAuth flow → returns (hh OAuth code, web session cookies).
+
+    The cookies are the logged-in hh.ru session captured from the same browser
+    context. Stored alongside the tokens and reused by the form-filler to solve
+    vacancy tests over the web endpoint — avoids re-login (and its captcha).
 
     on_captcha: async callback (screenshot_png_bytes) -> solution_string.
                 If captcha appears and callback is None, raises RuntimeError.
@@ -108,7 +112,8 @@ async def get_auth_code(
             code = await asyncio.wait_for(code_future, timeout=120.0)
             if not code:
                 raise RuntimeError("OAuth code empty in hhandroid:// redirect")
-            return code
+            cookies = await context.cookies()
+            return code, cookies
         finally:
             await browser.close()
 

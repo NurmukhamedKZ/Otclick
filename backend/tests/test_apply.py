@@ -193,13 +193,45 @@ async def test_apply_one_form_required_on_has_test():
         "employer": {"id": "42"},
     }
 
+    async def fake_fill(self, vacancy):
+        return "form_required"
+
     with (
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.FillerAgent, "fill", fake_fill),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1")
     assert result == "form_required"
+    client.post.assert_not_called()
+
+
+async def test_apply_one_sent_when_filler_solves_test():
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
+    client = MagicMock()
+    client.access_token = "tok"
+    client.get.return_value = {
+        "id": "v1",
+        "has_test": True,
+        "response_letter_required": False,
+        "employer": {"id": "42"},
+    }
+
+    async def fake_fill(self, vacancy):
+        return "form_sent"
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod, "load_api_client", return_value=client),
+        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.FillerAgent, "fill", fake_fill),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1")
+    assert result == "form_sent"
+    # filler owns the submit — apply must NOT also POST /negotiations
     client.post.assert_not_called()
 
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Application } from "@/lib/types";
 import { Btn, Card, Tag } from "@/components/otclick/ui";
@@ -12,6 +12,7 @@ const PAGE_SIZE = 25;
 const STATUSES = [
   { id: "all", label: "все", tone: "dark" as const },
   { id: "sent", label: "отправленные", tone: "ok" as const },
+  { id: "form_sent", label: "с тестом", tone: "ok" as const },
   { id: "captcha", label: "капча", tone: "coral" as const },
   { id: "failed", label: "ошибки", tone: "err" as const },
   { id: "skipped", label: "пропущенные", tone: "neutral" as const },
@@ -20,6 +21,7 @@ const STATUSES = [
 
 const STATUS_TAG: Record<string, { tone: "ok" | "coral" | "err" | "neutral"; label: string }> = {
   sent: { tone: "ok", label: "отправлено" },
+  form_sent: { tone: "ok", label: "форма ✓" },
   captcha: { tone: "coral", label: "капча" },
   failed: { tone: "err", label: "ошибка" },
   skipped: { tone: "neutral", label: "пропуск" },
@@ -47,6 +49,7 @@ export default function ApplicationsPage() {
   const [search, setSearch] = useState("");
   const [searchDebounced, setSearchDebounced] = useState("");
   const [spinning, setSpinning] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setSearchDebounced(search.trim()), 300);
@@ -276,9 +279,11 @@ export default function ApplicationsPage() {
         ) : (
           rows.map((a, i) => {
             const s = STATUS_TAG[a.status] ?? { tone: "neutral" as const, label: a.status };
+            const qa = a.form_answers ?? [];
+            const open = openId === a.id;
             return (
+              <Fragment key={a.id}>
               <div
-                key={a.id}
                 style={{
                   display: "grid",
                   gridTemplateColumns: "120px minmax(160px, 1fr) 160px minmax(140px, 1fr) 100px 60px",
@@ -314,6 +319,28 @@ export default function ApplicationsPage() {
                     <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
                       резюме {a.resume_id.slice(0, 8)}
                     </div>
+                  )}
+                  {qa.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setOpenId(open ? null : a.id)}
+                      style={{
+                        marginTop: 4,
+                        border: "none",
+                        background: "transparent",
+                        padding: 0,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: "var(--coral)",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
+                    >
+                      {open ? "▾" : "▸"} тест · {qa.length} вопр.
+                    </button>
                   )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
@@ -365,6 +392,35 @@ export default function ApplicationsPage() {
                   <IExternal size={15} />
                 </a>
               </div>
+              {open && qa.length > 0 && (
+                <div
+                  style={{
+                    padding: "2px 22px 18px",
+                    background: "var(--bg-deep)",
+                    borderBottom: i < rows.length - 1 ? "1px solid var(--line-2)" : "none",
+                  }}
+                >
+                  {qa.map((q, qi) => (
+                    <div key={q.task_id ?? qi} style={{ marginTop: qi ? 14 : 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>
+                        {qi + 1}. {q.question || "(без текста)"}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
+                        {q.type === "choice" ? "выбор" : "ответ"}:{" "}
+                        <span style={{ color: "var(--ink)", fontWeight: 600 }}>
+                          {q.answer || "—"}
+                        </span>
+                      </div>
+                      {q.type === "choice" && q.options && q.options.length > 0 && (
+                        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                          варианты: {q.options.map((o) => o.text).join(" · ")}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              </Fragment>
             );
           })
         )}

@@ -22,7 +22,7 @@ function buildHours(rows: { created_at: string; status: string }[]): HourBucket[
     const dt = new Date(row.created_at);
     const idx = buckets.findIndex((b) => b.h === dt.getHours());
     if (idx < 0) continue;
-    if (row.status === "sent") buckets[idx].sent += 1;
+    if (row.status === "sent" || row.status === "form_sent") buckets[idx].sent += 1;
     else if (row.status === "captcha") buckets[idx].capt += 1;
   }
   return buckets;

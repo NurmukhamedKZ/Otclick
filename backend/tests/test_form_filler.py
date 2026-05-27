@@ -1,0 +1,218 @@
+import json
+import os
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+# Set required env BEFORE importing app modules
+os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service")
+os.environ.setdefault(
+    "FERNET_KEY", "kPpDeJjFqDppkMm6QHzqFkkSgFwsKtGzh4WeZ5dKZHc="
+)
+
+
+def _fluent(return_data):
+    """Fluent MagicMock for chained Supabase calls ending in .execute()."""
+    m = MagicMock()
+    m.table.return_value = m
+    m.select.return_value = m
+    m.eq.return_value = m
+    m.maybe_single.return_value = m
+    m.execute.return_value = MagicMock(data=return_data)
+    return m
+
+
+def test_strip_tags_unescapes_entities():
+    from app.services.form_filler import _strip_tags
+
+    assert _strip_tags("&lt;p&gt;Есть ли опыт?&lt;/p&gt;") == "Есть ли опыт?"
+    assert _strip_tags("<b>raw</b>  tags") == "raw tags"
+    assert _strip_tags(None) == ""
+
+
+def test_resume_summary():
+    from app.services.form_filler import _resume_summary
+
+    resume = {
+        "title": "Python разработчик",
+        "skill_set": ["Python", "FastAPI", "PostgreSQL"],
+        "skills": "<p>Бэкенд 5 лет</p>",
+        "experience": [
+            {"position": "Backend dev", "company": "Acme",
+             "description": "<p>Сервисы на FastAPI</p>"},
+        ],
+    }
+    out = _resume_summary(resume)
+    assert "Python разработчик" in out
+    assert "FastAPI" in out
+    assert "Бэкенд 5 лет" in out  # tags stripped
+    assert "Backend dev @ Acme" in out
+    assert "<p>" not in out
+
+
+def test_extract_xsrf_token():
+    from app.services.form_filler import extract_xsrf_token
+
+    html = 'foo,"xsrfToken":"abc123def","counters":{}'
+    assert extract_xsrf_token(html) == "abc123def"
+
+
+def test_extract_xsrf_token_missing():
+    from app.services.form_filler import extract_xsrf_token
+
+    with pytest.raises(ValueError):
+        extract_xsrf_token("<html>no token here</html>")
+
+
+@pytest.mark.asyncio
+async def test_load_web_session_builds_cookies():
+    from app.services.hh_auth import encrypt_token
+    from app.services import form_filler
+
+    cookies = [
+        {"name": "_xsrf", "value": "tok", "domain": ".hh.ru", "path": "/"},
+        {"name": "hhuid", "value": "uid123", "domain": ".hh.ru", "path": "/"},
+    ]
+    enc = encrypt_token(json.dumps(cookies))
+    fake = _fluent({"web_cookies_encrypted": enc})
+
+    with patch.object(form_filler, "service_client", fake):
+        session = await form_filler.load_web_session("user-1")
+
+    assert session.cookies.get("_xsrf") == "tok"
+    assert session.cookies.get("hhuid") == "uid123"
+
+
+@pytest.mark.asyncio
+async def test_load_web_session_no_cookies_raises():
+    from app.services import form_filler
+
+    fake = _fluent({"web_cookies_encrypted": None})
+    with patch.object(form_filler, "service_client", fake):
+        with pytest.raises(ValueError):
+            await form_filler.load_web_session("user-1")
+
+
+def test_parse_tests_extracts_vacancy_block():
+    from app.services.form_filler import _parse_tests
+
+    page = (
+        'window.state={"foo":1,"vacancyTests":'
+        '{"999":{"uidPk":"u","guid":"g","startTime":123,"required":true,"tasks":[]}}'
+        ',"counters":{"x":1}};'
+    )
+    td = _parse_tests(page, "999")
+    assert td["uidPk"] == "u"
+    assert td["required"] is True
+
+
+def test_parse_tests_missing_raises():
+    from app.services.form_filler import _parse_tests
+
+    with pytest.raises(ValueError):
+        _parse_tests("<html>nothing</html>", "1")
+
+
+def test_choose_solution_fallback_prefers_da():
+    from app.services.form_filler import _choose_solution
+
+    solutions = [{"id": 10, "text": "Нет"}, {"id": 20, "text": "Да"}]
+    assert _choose_solution(None, "q?", solutions) == "20"
+
+
+def test_choose_solution_fallback_middle_when_no_da():
+    from app.services.form_filler import _choose_solution
+
+    solutions = [{"id": 1, "text": "a"}, {"id": 2, "text": "b"}, {"id": 3, "text": "c"}]
+    assert _choose_solution(None, "q?", solutions) == "2"
+
+
+def test_choose_solution_ai_picks_valid_id():
+    from app.services.form_filler import _choose_solution
+
+    chat = MagicMock()
+    chat.invoke.return_value = MagicMock(content="Ответ: 20")
+    solutions = [{"id": 10, "text": "Нет"}, {"id": 20, "text": "Да"}]
+    assert _choose_solution(chat, "q?", solutions) == "20"
+
+
+def test_choose_solution_ai_invalid_id_falls_back():
+    from app.services.form_filler import _choose_solution
+
+    chat = MagicMock()
+    chat.invoke.return_value = MagicMock(content="999")  # not an option
+    solutions = [{"id": 10, "text": "Нет"}, {"id": 20, "text": "Да"}]
+    assert _choose_solution(chat, "q?", solutions) == "20"  # fallback → "да"
+
+
+def test_is_success():
+    from app.services.form_filler import _is_success
+
+    ok = MagicMock(status_code=200)
+    ok.json.return_value = {"negotiation": {"id": 1}}
+    assert _is_success(ok) is True
+
+    err = MagicMock(status_code=200)
+    err.json.return_value = {"error": "bad"}
+    assert _is_success(err) is False
+
+    bad = MagicMock(status_code=403)
+    assert _is_success(bad) is False
+
+
+@pytest.mark.asyncio
+async def test_fill_no_session_returns_form_required():
+    from app.services import form_filler
+
+    fake = _fluent({"web_cookies_encrypted": None})
+    with patch.object(form_filler, "service_client", fake):
+        agent = form_filler.FillerAgent("user-1")
+        assert await agent.fill({"id": "777"}) == "form_required"
+
+
+def test_solve_and_submit_collects_answers():
+    from app.services.form_filler import _solve_and_submit
+
+    td = {
+        "777": {
+            "uidPk": "u", "guid": "g", "startTime": 1, "required": True,
+            "tasks": [
+                {"id": 11, "description": "Готовы переехать?",
+                 "candidateSolutions": [{"id": 1, "text": "Да"}, {"id": 2, "text": "Нет"}]},
+                {"id": 12, "description": "Расскажите о себе", "candidateSolutions": []},
+            ],
+        }
+    }
+    page = (
+        'pre,"xsrfToken":"XT","vacancyTests":' + json.dumps(td) + ',"counters":{}'
+    )
+
+    get_resp = MagicMock(status_code=200, text=page)
+    post_resp = MagicMock(status_code=200)
+    session = MagicMock()
+    session.get.return_value = get_resp
+    session.post.return_value = post_resp
+
+    resp, answers = _solve_and_submit(session, {"id": "777"}, "hh-r", chat=None)
+
+    assert resp is post_resp
+    assert len(answers) == 2
+
+    choice = answers[0]
+    assert choice["type"] == "choice"
+    assert choice["question"] == "Готовы переехать?"
+    assert choice["answer_id"] == "1"  # fallback prefers "да"
+    assert choice["answer"] == "Да"
+    assert {"id": "2", "text": "Нет"} in choice["options"]
+
+    text = answers[1]
+    assert text["type"] == "text"
+    assert text["answer"] == "Да"  # no chat → fallback
+
+    # posted payload carries the answer fields
+    posted = session.post.call_args.kwargs["data"]
+    assert posted["task_11"] == "1"
+    assert posted["task_12_text"] == "Да"
+    assert posted["resume_hash"] == "hh-r"

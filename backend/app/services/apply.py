@@ -21,6 +21,7 @@ from app.db.supabase import service_client
 from app.hh import errors as hh_errors
 from app.services import captcha as captcha_service
 from app.services import cover_letter as cover_letter_service
+from app.services.form_filler import FillerAgent
 from app.services.hh_credentials import (
     HHCredentialsInvalid,
     load_api_client,
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 ApplyStatus = Literal[
     "sent",
+    "form_sent",
     "failed",
     "captcha",
     "skipped",
@@ -135,6 +137,7 @@ def _record_application(
     cover_letter: str | None,
     error: str | None,
     employer_id: str | None = None,
+    form_answers: list[dict] | None = None,
 ) -> None:
     row = {
         "user_id": user_id,
@@ -145,8 +148,10 @@ def _record_application(
         "cover_letter": cover_letter,
         "error": error,
     }
-    if status == "sent":
+    if status in ("sent", "form_sent"):
         row["applied_at"] = datetime.now(timezone.utc).isoformat()
+    if form_answers:
+        row["form_answers"] = form_answers
     try:
         service_client.table("applications").upsert(
             row, on_conflict="user_id,vacancy_id"
@@ -237,20 +242,26 @@ async def apply_one(
         # Has-test check survives the producer race: vacancy may have flipped
         # has_test=true between search and apply.
         if vacancy.get("has_test") is True:
-            logger.info("apply: vacancy=%s has_test=true → form_required", vacancy_id)
+            agent = FillerAgent(user_id, resume_uuid)
+            fill_status = await agent.fill(vacancy)
+            logger.info(
+                "apply: vacancy=%s has_test=true → fill_status=%s",
+                vacancy_id, fill_status,
+            )
             await loop.run_in_executor(
                 None,
                 lambda: _record_application(
                     user_id=user_id,
                     resume_uuid=resume_uuid,
                     vacancy_id=vacancy_id,
-                    status="form_required",
+                    status=fill_status,
                     cover_letter=None,
-                    error="vacancy.has_test",
+                    error=None if fill_status == "form_sent" else "vacancy.has_test",
                     employer_id=employer_id,
+                    form_answers=agent.answers or None,
                 ),
             )
-            return "form_required"
+            return fill_status
 
         letter_required = bool(vacancy.get("response_letter_required"))
         cover_letter = ""

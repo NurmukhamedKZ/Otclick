@@ -54,9 +54,13 @@ export default function RealtimeBridge() {
           { event: "INSERT", schema: "public", table: "notifications", filter },
           (payload) => {
             const n = payload.new as NotificationRow;
+            const title =
+              n.type === "apply_success" && n.payload?.via === "form"
+                ? "Отклик с тестом отправлен"
+                : TYPE_TITLE[n.type] ?? n.type;
             pushToast({
               kind: TYPE_KIND[n.type] ?? "info",
-              title: TYPE_TITLE[n.type] ?? n.type,
+              title,
               body: formatBody(n),
             });
           },

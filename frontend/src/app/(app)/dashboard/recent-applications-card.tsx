@@ -11,6 +11,7 @@ const LIMIT = 8;
 
 const STATUS_TAG: Record<string, { tone: "ok" | "coral" | "err" | "neutral"; label: string }> = {
   sent: { tone: "ok", label: "отправлено" },
+  form_sent: { tone: "ok", label: "форма ✓" },
   captcha: { tone: "coral", label: "капча" },
   failed: { tone: "err", label: "ошибка" },
   skipped: { tone: "neutral", label: "пропуск" },

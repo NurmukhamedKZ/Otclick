@@ -37,7 +37,7 @@ export default function WeeklyPlan() {
         .from("applications")
         .select("*", { count: "exact", head: true })
         .gte("created_at", start.toISOString())
-        .eq("status", "sent");
+        .in("status", ["sent", "form_sent"]);
       if (cancelled) return;
       setWeekSent(count ?? 0);
     })();

@@ -82,6 +82,15 @@ export type WorkerStopResponse = {
   stopped: boolean;
 };
 
+export type FormAnswer = {
+  task_id: number;
+  question: string;
+  type: "choice" | "text";
+  options?: { id: string; text: string }[];
+  answer_id?: string;
+  answer: string;
+};
+
 export type Application = {
   id: string;
   user_id: string;
@@ -93,6 +102,7 @@ export type Application = {
   applied_at: string | null;
   error: string | null;
   created_at: string;
+  form_answers: FormAnswer[] | null;
 };
 
 export type CaptchaRequest = {

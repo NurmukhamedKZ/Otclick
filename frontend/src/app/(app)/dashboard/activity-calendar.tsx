@@ -42,7 +42,7 @@ export default function ActivityCalendar() {
         .select("created_at,status")
         .gte("created_at", start)
         .lt("created_at", end)
-        .eq("status", "sent");
+        .in("status", ["sent", "form_sent"]);
       if (cancelled) return;
       const m = new Map<number, number>();
       let mx = 0;
