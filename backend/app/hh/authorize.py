@@ -122,7 +122,22 @@ async def _handle_captcha_if_present(page, on_captcha):
     if on_captcha is None:
         raise RuntimeError("Captcha required but no handler provided")
 
-    screenshot = await page.locator(SEL_CAPTCHA_IMAGE).screenshot()
+    locator = page.locator(SEL_CAPTCHA_IMAGE)
+    await locator.evaluate(
+        "img => img.complete && img.naturalWidth > 0 "
+        "? Promise.resolve() "
+        ": new Promise((res, rej) => { "
+        "img.addEventListener('load', res, {once: true}); "
+        "img.addEventListener('error', rej, {once: true}); "
+        "})"
+    )
+    await page.wait_for_function(
+        "sel => { const i = document.querySelector(sel);"
+        " return i && i.complete && i.naturalWidth > 0 && i.getBoundingClientRect().height > 20; }",
+        arg=SEL_CAPTCHA_IMAGE,
+        timeout=10000,
+    )
+    screenshot = await locator.screenshot()
     solution = await on_captcha(screenshot)
     await page.fill(SEL_CAPTCHA_INPUT, solution)
     await page.keyboard.press("Enter")

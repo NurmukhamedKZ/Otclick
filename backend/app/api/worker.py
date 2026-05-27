@@ -45,23 +45,34 @@ async def stop_worker(user_id: str = Depends(get_current_user)) -> StopResponse:
 
 @router.get("/status", response_model=StatusResponse)
 async def worker_status(user_id: str = Depends(get_current_user)) -> StatusResponse:
-    from app.worker.limiter import DAILY_LIMIT
+    import asyncio
+
+    from app.worker.limiter import DAILY_LIMIT, _read_day_count, _today_local, _tz_for_user
+
+    loop = asyncio.get_running_loop()
+
+    def _today_count_db() -> int:
+        tz = _tz_for_user(user_id)
+        return _read_day_count(user_id, _today_local(tz))
+
+    db_today = await loop.run_in_executor(None, _today_count_db)
+    queued = get_user_queue(user_id).qsize()
 
     handle = get_registry().get(user_id)
     if handle is None:
         return StatusResponse(
             state="stopped",
-            today_count=0,
+            today_count=db_today,
             daily_limit=DAILY_LIMIT,
-            queued=0,
+            queued=queued,
             next_run_at=None,
             last_error=None,
         )
     return StatusResponse(
         state=handle.state,
-        today_count=handle.today_count,
+        today_count=max(handle.today_count, db_today),
         daily_limit=DAILY_LIMIT,
-        queued=get_user_queue(user_id).qsize(),
+        queued=queued,
         next_run_at=handle.next_run_at.isoformat() if handle.next_run_at else None,
         last_error=handle.last_error,
         skipped_has_test=handle.skipped_has_test,
