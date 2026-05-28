@@ -10,7 +10,7 @@ import pytest
 
 
 def test_build_recruiter_prompt_embeds_resume_and_rules():
-    from app.ai.prompt import build_recruiter_prompt
+    from backend.app.ai.prompts import build_recruiter_prompt
     p = build_recruiter_prompt("Python dev, 3 года опыта")
     assert "Python dev, 3 года опыта" in p
     assert "send_message_recruiter" in p
