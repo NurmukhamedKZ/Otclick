@@ -213,7 +213,7 @@ async def test_apply_one_form_required_on_has_test():
     client.post.assert_not_called()
 
 
-async def test_apply_one_sent_when_filler_solves_test():
+async def test_apply_one_form_pending_when_filler_drafts_answers():
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
@@ -226,16 +226,21 @@ async def test_apply_one_sent_when_filler_solves_test():
         "employer": {"id": "42"},
     }
 
-    agent = _fake_agent(form=("form_sent", [{"task_id": 1, "answer": "Да"}]))
+    agent = _fake_agent(form=("form_pending", [{"task_id": 1, "answer": "Да"}]))
+
+    async def _ok(*a, **kw):
+        return None
 
     with (
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.form_drafts, "insert_draft", side_effect=_ok),
+        patch.object(apply_mod.notifications, "notify", side_effect=_ok),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", agent)
-    assert result == "form_sent"
-    # filler owns the submit — apply must NOT also POST /negotiations
+    assert result == "form_pending"
+    # answers go to drafts table — apply must NOT submit to hh
     client.post.assert_not_called()
 
 

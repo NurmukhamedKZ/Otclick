@@ -11,7 +11,6 @@ from app.db.supabase import service_client
 logger = logging.getLogger(__name__)
 
 NotificationType = Literal[
-    "apply_success",
     "captcha",
     "worker_stop",
     "limit_reached",
@@ -20,6 +19,8 @@ NotificationType = Literal[
     "resume_missing",
     "recruiter_draft",
     "recruiter_todo",
+    "form_approval",
+    "cover_letter_written",
 ]
 
 

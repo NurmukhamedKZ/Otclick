@@ -96,16 +96,19 @@ async def reset_counter(user_id: str = Depends(get_current_user)) -> dict:
 
 @router.post("/notify")
 async def fire_notification(
-    type_: str = "apply_success", user_id: str = Depends(get_current_user)
+    type_: str = "captcha", user_id: str = Depends(get_current_user)
 ) -> dict:
     _ensure_enabled()
     allowed = {
-        "apply_success",
         "captcha",
         "worker_stop",
         "limit_reached",
         "token_dead",
         "resume_missing",
+        "recruiter_todo",
+        "recruiter_draft",
+        "form_approval",
+        "cover_letter_written",
     }
     if type_ not in allowed:
         raise HTTPException(status_code=400, detail=f"type must be one of {sorted(allowed)}")

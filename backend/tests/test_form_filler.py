@@ -163,20 +163,20 @@ def test_is_success():
 
 
 @pytest.mark.asyncio
-async def test_fill_no_session_returns_form_required():
+async def test_prepare_no_session_returns_form_required():
     from app.services import form_filler
 
     fake = _fluent({"web_cookies_encrypted": None})
     with patch.object(form_filler, "service_client", fake):
-        status, answers = await form_filler.fill_form(
+        status, answers = await form_filler.prepare_form_answers(
             MagicMock(), "user-1", "r-uuid", {"id": "777"}
         )
     assert status == "form_required"
     assert answers == []
 
 
-def test_solve_and_submit_collects_answers():
-    from app.services.form_filler import _solve_and_submit
+def test_solve_collects_answers_without_submitting():
+    from app.services.form_filler import _solve
 
     td = {
         "777": {
@@ -193,14 +193,12 @@ def test_solve_and_submit_collects_answers():
     )
 
     get_resp = MagicMock(status_code=200, text=page)
-    post_resp = MagicMock(status_code=200)
     session = MagicMock()
     session.get.return_value = get_resp
-    session.post.return_value = post_resp
 
-    resp, answers = _solve_and_submit(session, {"id": "777"}, "hh-r", chat=None)
+    answers = _solve(session, "777", chat=None, resume_ctx="")
 
-    assert resp is post_resp
+    session.post.assert_not_called()
     assert len(answers) == 2
 
     choice = answers[0]
@@ -214,8 +212,33 @@ def test_solve_and_submit_collects_answers():
     assert text["type"] == "text"
     assert text["answer"] == "Да"  # no chat → fallback
 
-    # posted payload carries the answer fields
+
+def test_submit_posts_approved_answers():
+    from app.services.form_filler import _submit
+
+    td = {
+        "777": {
+            "uidPk": "u", "guid": "g", "startTime": 1, "required": True,
+            "tasks": [],
+        }
+    }
+    page = (
+        'pre,"xsrfToken":"XT","vacancyTests":' + json.dumps(td) + ',"counters":{}'
+    )
+    get_resp = MagicMock(status_code=200, text=page)
+    post_resp = MagicMock(status_code=200)
+    session = MagicMock()
+    session.get.return_value = get_resp
+    session.post.return_value = post_resp
+
+    answers = [
+        {"task_id": 11, "type": "choice", "answer_id": "1", "answer": "Да"},
+        {"task_id": 12, "type": "text", "answer": "Привет"},
+    ]
+    resp = _submit(session, "777", "hh-r", answers, letter="L")
+    assert resp is post_resp
     posted = session.post.call_args.kwargs["data"]
     assert posted["task_11"] == "1"
-    assert posted["task_12_text"] == "Да"
+    assert posted["task_12_text"] == "Привет"
     assert posted["resume_hash"] == "hh-r"
+    assert posted["letter"] == "L"

@@ -18,7 +18,7 @@ from app.ai.prompt import build_recruiter_prompt
 from app.ai.recruiter_tools import RECRUITER_TOOLS, RecruiterContext
 from app.config import settings
 from app.services.cover_letter import generate as _generate_cover_letter
-from app.services.form_filler import FillStatus, fill_form
+from app.services.form_filler import FillStatus, prepare_form_answers
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +47,8 @@ class HHAgent:
     async def write_form_answers(
         self, user_id: str, resume_id: str, vacancy: dict
     ) -> tuple[FillStatus, list[dict]]:
-        """Solve a vacancy test and submit. Returns (status, per-task answers)."""
-        return await fill_form(self.llm, user_id, resume_id, vacancy)
+        """Generate vacancy-test answers — caller persists for user approval."""
+        return await prepare_form_answers(self.llm, user_id, resume_id, vacancy)
 
     async def write_cover_letter(
         self, user_id: str, vacancy: dict, resume: dict, resume_uuid: str

@@ -34,6 +34,11 @@ SEL_PASSWORD_INPUT = (
 SEL_CAPTCHA_IMAGE = 'img[data-qa="account-captcha-picture"]'
 SEL_CAPTCHA_INPUT = 'input[data-qa="account-captcha-input"]'
 
+SEL_EMAIL_INPUT = 'input[data-qa="applicant-login-input-email"]'
+SEL_SUBMIT_BUTTON = 'button[data-qa="submit-button"]'
+SEL_CODE_CONTAINER = 'div[data-qa="account-login-code-input"]'
+SEL_PIN_CODE_INPUT = 'input[data-qa="magritte-pincode-input-field"]'
+
 
 def build_authorize_url() -> str:
     qs = urlencode({"client_id": ANDROID_CLIENT_ID, "response_type": "code"})
@@ -146,3 +151,66 @@ async def _handle_captcha_if_present(page, on_captcha):
     solution = await on_captcha(screenshot)
     await page.fill(SEL_CAPTCHA_INPUT, solution)
     await page.keyboard.press("Enter")
+
+
+async def get_auth_code_via_email_code(
+    email: str,
+    on_code_required: Callable[[], Awaitable[str]] | None = None,
+    on_captcha: Callable[[bytes], Awaitable[str]] | None = None,
+    headless: bool = True,
+) -> tuple[str, list[dict]]:
+    """Run Playwright OAuth flow using email-code (passwordless) → returns (hh OAuth code, web session cookies).
+
+    Flow:
+    1. Fill email → click submit ("Дальше") → captcha? → code page
+    2. on_code_required callback: code page is visible → ask user for code from email
+    3. Fill pincode input → submit → captcha? → intercept redirect
+
+    on_code_required: async callback () → code_string. Called when hh.ru shows the code input page.
+    on_captcha: async callback (screenshot_png_bytes) → solution_string.
+    """
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=headless)
+        try:
+            device = pw.devices["Galaxy A55"]
+            context = await browser.new_context(**device)
+            page = await context.new_page()
+
+            code_future: asyncio.Future[str | None] = asyncio.Future()
+
+            def handle_request(request):
+                url = request.url
+                if url.startswith(f"{HH_ANDROID_SCHEME}://"):
+                    if not code_future.done():
+                        code = parse_qs(urlsplit(url).query).get("code", [None])[0]
+                        code_future.set_result(code)
+
+            page.on("request", handle_request)
+
+            await page.goto(build_authorize_url(), timeout=30000, wait_until="load")
+
+            await page.wait_for_selector(SEL_EMAIL_INPUT, timeout=10000, state="visible")
+            await page.fill(SEL_EMAIL_INPUT, email)
+
+            await page.click(SEL_SUBMIT_BUTTON)
+
+            await _handle_captcha_if_present(page, on_captcha)
+
+            await page.wait_for_selector(SEL_CODE_CONTAINER, timeout=30000, state="visible")
+
+            if on_code_required is None:
+                raise RuntimeError("Email code required but no handler provided")
+            code = await on_code_required()
+
+            await page.fill(SEL_PIN_CODE_INPUT, code)
+            await page.keyboard.press("Enter")
+
+            await _handle_captcha_if_present(page, on_captcha)
+
+            oauth_code = await asyncio.wait_for(code_future, timeout=120.0)
+            if not oauth_code:
+                raise RuntimeError("OAuth code empty in hhandroid:// redirect")
+            cookies = await context.cookies()
+            return oauth_code, cookies
+        finally:
+            await browser.close()

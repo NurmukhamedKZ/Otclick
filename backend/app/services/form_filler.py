@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Subset of apply.ApplyStatus that fill() can produce.
 # "form_sent" = a test was solved + submitted (distinct from a plain "sent").
-FillStatus = Literal["form_sent", "form_required", "failed"]
+FillStatus = Literal["form_sent", "form_required", "form_pending", "failed"]
 
 # Desktop UA for the hh.ru web session (test pages live on the desktop site).
 HH_WEB_USER_AGENT = (
@@ -221,28 +221,73 @@ def _free_text(chat: BaseChatModel | None, question: str, resume_ctx: str = "") 
     return "Да"
 
 
-def _solve_and_submit(
-    session: requests.Session,
-    vacancy: dict,
-    hh_resume_id: str,
-    chat: BaseChatModel | None,
-    resume_ctx: str = "",
-    letter: str = "",
-) -> tuple[requests.Response, list[dict]]:
-    """Fetch the test, answer each task, POST the response. Sync — runs in executor.
-
-    Returns (response, answers) where answers is a per-task record of the
-    question and the chosen answer for persistence/audit.
-    """
-    vacancy_id = str(vacancy["id"])
-    response_url = (
+def _response_url(vacancy_id: str) -> str:
+    return (
         f"https://hh.ru/applicant/vacancy_response?vacancyId={vacancy_id}"
         "&startedWithQuestion=false&hhtmFrom=vacancy"
     )
+
+
+def _build_answers(
+    test_data: dict, chat: BaseChatModel | None, resume_ctx: str
+) -> list[dict]:
+    answers: list[dict] = []
+    for task in test_data["tasks"]:
+        solutions = task.get("candidateSolutions") or []
+        question = _strip_tags(task.get("description"))
+        if solutions:
+            sel_id = _choose_solution(chat, question, solutions, resume_ctx)
+            sel_text = next(
+                (_strip_tags(s.get("text")) for s in solutions if str(s["id"]) == sel_id),
+                "",
+            )
+            answers.append({
+                "task_id": task["id"],
+                "question": question,
+                "type": "choice",
+                "options": [
+                    {"id": str(s["id"]), "text": _strip_tags(s.get("text"))}
+                    for s in solutions
+                ],
+                "answer_id": sel_id,
+                "answer": sel_text,
+            })
+        else:
+            ans = _free_text(chat, question, resume_ctx)
+            answers.append({
+                "task_id": task["id"],
+                "question": question,
+                "type": "text",
+                "answer": ans,
+            })
+    return answers
+
+
+def _solve(
+    session: requests.Session,
+    vacancy_id: str,
+    chat: BaseChatModel | None,
+    resume_ctx: str,
+) -> list[dict]:
+    """Fetch the test page and produce AI answers WITHOUT submitting."""
+    r = session.get(_response_url(vacancy_id), timeout=15)
+    r.raise_for_status()
+    test_data = _parse_tests(r.text, vacancy_id)
+    return _build_answers(test_data, chat, resume_ctx)
+
+
+def _submit(
+    session: requests.Session,
+    vacancy_id: str,
+    hh_resume_id: str,
+    answers: list[dict],
+    letter: str,
+) -> requests.Response:
+    """Re-fetch xsrf+test meta, build payload from approved answers, POST."""
+    response_url = _response_url(vacancy_id)
     r = session.get(response_url, timeout=15)
     r.raise_for_status()
     page = r.text
-
     test_data = _parse_tests(page, vacancy_id)
     xsrf = extract_xsrf_token(page)
 
@@ -262,41 +307,14 @@ def _solve_and_submit(
         "withoutTest": "no",
         "letter": letter,
     }
-
-    answers: list[dict] = []
-    for task in test_data["tasks"]:
-        field = f"task_{task['id']}"
-        solutions = task.get("candidateSolutions") or []
-        question = _strip_tags(task.get("description"))
-        if solutions:
-            sel_id = _choose_solution(chat, question, solutions, resume_ctx)
-            sel_text = next(
-                (_strip_tags(s.get("text")) for s in solutions if str(s["id"]) == sel_id),
-                "",
-            )
-            payload[field] = sel_id
-            answers.append({
-                "task_id": task["id"],
-                "question": question,
-                "type": "choice",
-                "options": [
-                    {"id": str(s["id"]), "text": _strip_tags(s.get("text"))}
-                    for s in solutions
-                ],
-                "answer_id": sel_id,
-                "answer": sel_text,
-            })
+    for a in answers:
+        field = f"task_{a['task_id']}"
+        if a.get("type") == "choice":
+            payload[field] = str(a["answer_id"])
         else:
-            ans = _free_text(chat, question, resume_ctx)
-            payload[f"{field}_text"] = ans
-            answers.append({
-                "task_id": task["id"],
-                "question": question,
-                "type": "text",
-                "answer": ans,
-            })
+            payload[f"{field}_text"] = a.get("answer", "")
 
-    resp = session.post(
+    return session.post(
         "https://hh.ru/applicant/vacancy_response/popup",
         data=payload,
         headers={
@@ -308,7 +326,6 @@ def _solve_and_submit(
         },
         timeout=20,
     )
-    return resp, answers
 
 
 def _is_success(resp: requests.Response) -> bool:
@@ -323,19 +340,14 @@ def _is_success(resp: requests.Response) -> bool:
     return True
 
 
-async def fill_form(
+async def prepare_form_answers(
     llm: BaseChatModel, user_id: str, resume_id: str, vacancy: dict
 ) -> tuple[FillStatus, list[dict]]:
-    """Solve a vacancy test and submit the application over the hh.ru web
-    endpoint, reusing the stored web session (no browser, no re-login).
+    """Generate AI answers for a vacancy test — DO NOT submit.
 
-    Answers are produced by `llm` (the caller's shared HHAgent model). Returns
-    (status, answers): "form_sent" on accepted submit (distinct from a plain
-    auto "sent" so the UI can flag test-solved applications), "form_required"
-    otherwise (no stored session, no resume, fetch/parse failure, or hh
-    rejected the answers) so the caller falls back to skip + manual handling.
-    `answers` is the per-task question/answer record for persistence (empty
-    when we bailed before solving).
+    Returns ("form_pending", answers) on success so caller can persist as a
+    user-approval draft. Returns ("form_required", []) on no web session, no
+    resume, or fetch/parse failure (caller records as manual fallback).
     """
     vacancy_id = str(vacancy.get("id") or "")
     loop = asyncio.get_running_loop()
@@ -347,12 +359,11 @@ async def fill_form(
         return "form_required", []
 
     try:
-        hh_resume_id = await _get_hh_resume_id(user_id, resume_id)
+        await _get_hh_resume_id(user_id, resume_id)
     except ValueError as ex:
         logger.warning("fill: %s", ex)
         return "form_required", []
 
-    # No API key → answer with fallbacks (None signals "no AI" to the helpers).
     chat = llm if settings.OPENAI_API_KEY else None
     resume_ctx = ""
     if chat is not None:
@@ -365,18 +376,54 @@ async def fill_form(
             )
 
     try:
-        resp, answers = await loop.run_in_executor(
-            None, _solve_and_submit, session, vacancy, hh_resume_id, chat, resume_ctx
+        answers = await loop.run_in_executor(
+            None, _solve, session, vacancy_id, chat, resume_ctx
         )
     except Exception:
-        logger.exception("fill: solve/submit failed for vacancy=%s", vacancy_id)
+        logger.exception("fill: solve failed for vacancy=%s", vacancy_id)
         return "form_required", []
 
-    if _is_success(resp):
-        logger.info("fill: test solved + submitted vacancy=%s", vacancy_id)
-        return "form_sent", answers
-    logger.warning(
-        "fill: submit not accepted vacancy=%s status=%s body=%.300s",
-        vacancy_id, resp.status_code, resp.text,
+    logger.info(
+        "fill: answers prepared (awaiting approval) vacancy=%s n=%d",
+        vacancy_id, len(answers),
     )
-    return "form_required", answers
+    return "form_pending", answers
+
+
+async def submit_prepared_form(
+    user_id: str, resume_id: str, vacancy_id: str,
+    answers: list[dict], letter: str = "",
+) -> tuple[FillStatus, str | None]:
+    """Submit previously-approved answers to hh. Re-fetches fresh xsrf each call.
+
+    Returns (status, error). "form_sent" on accepted submit, "failed" + reason
+    otherwise (network/parse error, or hh rejected).
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        session = await load_web_session(user_id)
+    except ValueError as ex:
+        return "failed", f"no_web_session: {ex}"
+
+    try:
+        hh_resume_id = await _get_hh_resume_id(user_id, resume_id)
+    except ValueError as ex:
+        return "failed", f"resume_missing: {ex}"
+
+    try:
+        resp = await loop.run_in_executor(
+            None, _submit, session, vacancy_id, hh_resume_id, answers, letter
+        )
+    except Exception as ex:
+        logger.exception("fill: submit failed vacancy=%s", vacancy_id)
+        return "failed", f"submit_error: {ex}"
+
+    if _is_success(resp):
+        logger.info("fill: approved answers submitted vacancy=%s", vacancy_id)
+        return "form_sent", None
+    body = (resp.text or "")[:300]
+    logger.warning(
+        "fill: submit rejected vacancy=%s status=%s body=%.300s",
+        vacancy_id, resp.status_code, body,
+    )
+    return "failed", f"hh_rejected: {resp.status_code} {body}"

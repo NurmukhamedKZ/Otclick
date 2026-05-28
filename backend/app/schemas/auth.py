@@ -5,12 +5,17 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-JobStatus = Literal["running", "captcha_required", "success", "failed"]
+JobStatus = Literal["running", "captcha_required", "code_required", "success", "failed"]
 
 
 class HHConnectRequest(BaseModel):
     username: str = Field(min_length=1)
-    password: str = Field(min_length=1)
+    password: str | None = None
+    login_method: Literal["password", "email_code"] = "password"
+
+
+class EnterCodeRequest(BaseModel):
+    code: str = Field(min_length=1)
 
 
 class HHConnectResponse(BaseModel):

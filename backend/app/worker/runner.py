@@ -274,15 +274,6 @@ async def _run_loop(handle: RunnerHandle) -> None:
         if status in ("sent", "form_sent"):
             handle.today_count = await limiter.increment(user_id)
             handle.cluster.record_apply()
-            await notify(
-                user_id,
-                "apply_success",
-                {
-                    "vacancy_id": job.vacancy_id,
-                    "today_count": handle.today_count,
-                    "via": "form" if status == "form_sent" else "auto",
-                },
-            )
         elif status == "captcha":
             handle.state = "paused_captcha"
             handle.captcha_event.clear()
@@ -319,6 +310,8 @@ async def _run_loop(handle: RunnerHandle) -> None:
             logger.error("user %s: account banned — stopping runner", user_id)
             return
         elif status == "form_required":
+            handle.skipped_has_test += 1
+        elif status == "form_pending":
             handle.skipped_has_test += 1
         elif status == "vacancy_gone":
             pass

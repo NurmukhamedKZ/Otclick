@@ -1,0 +1,247 @@
+"use client";
+
+import { useState } from "react";
+import Topbar from "@/components/otclick/topbar";
+import { Btn, Card } from "@/components/otclick/ui";
+import { useRecruiter, type Draft } from "@/hooks/useRecruiter";
+import { useFormDrafts, type FormAnswer, type FormDraft } from "@/hooks/useFormDrafts";
+
+function FormDraftCard({
+  draft,
+  onApprove,
+  onDiscard,
+}: {
+  draft: FormDraft;
+  onApprove: (id: string, answers: FormAnswer[], letter: string) => void;
+  onDiscard: (id: string) => void;
+}) {
+  const [answers, setAnswers] = useState<FormAnswer[]>(draft.answers);
+  const [letter, setLetter] = useState(draft.letter ?? "");
+
+  const update = (idx: number, patch: Partial<FormAnswer>) =>
+    setAnswers((prev) => prev.map((a, i) => (i === idx ? { ...a, ...patch } : a)));
+
+  return (
+    <Card style={{ display: "grid", gap: 10 }}>
+      <div style={{ fontWeight: 600 }}>
+        {draft.vacancy_title ?? `Вакансия ${draft.vacancy_id}`}
+      </div>
+      {draft.employer_name && (
+        <div style={{ fontSize: 13, color: "var(--muted)" }}>{draft.employer_name}</div>
+      )}
+      {draft.vacancy_url && (
+        <a
+          href={draft.vacancy_url}
+          target="_blank"
+          rel="noreferrer"
+          style={{ fontSize: 13, color: "var(--coral)", textDecoration: "underline" }}
+        >
+          Открыть вакансию ↗
+        </a>
+      )}
+      <div style={{ display: "grid", gap: 12, paddingTop: 6 }}>
+        {answers.map((a, i) => (
+          <div key={a.task_id} style={{ display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{a.question}</div>
+            {a.type === "choice" && a.options ? (
+              <select
+                value={a.answer_id ?? ""}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  const text = a.options!.find((o) => o.id === id)?.text ?? "";
+                  update(i, { answer_id: id, answer: text });
+                }}
+                style={{
+                  padding: 8,
+                  borderRadius: 10,
+                  border: "1px solid var(--line)",
+                  background: "var(--bg-deep)",
+                  color: "var(--ink)",
+                }}
+              >
+                {a.options.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.text}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <textarea
+                value={a.answer}
+                onChange={(e) => update(i, { answer: e.target.value })}
+                rows={3}
+                style={{
+                  width: "100%",
+                  resize: "vertical",
+                  padding: 8,
+                  borderRadius: 10,
+                  border: "1px solid var(--line)",
+                  background: "var(--bg-deep)",
+                  color: "var(--ink)",
+                  fontSize: 13,
+                }}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gap: 6, paddingTop: 6 }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>Сопроводительное (опционально)</div>
+        <textarea
+          value={letter}
+          onChange={(e) => setLetter(e.target.value)}
+          rows={3}
+          style={{
+            width: "100%",
+            resize: "vertical",
+            padding: 8,
+            borderRadius: 10,
+            border: "1px solid var(--line)",
+            background: "var(--bg-deep)",
+            color: "var(--ink)",
+            fontSize: 13,
+          }}
+        />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn kind="primary" size="sm" onClick={() => onApprove(draft.id, answers, letter)}>
+          Подтвердить и отправить
+        </Btn>
+        <Btn kind="ghost" size="sm" onClick={() => onDiscard(draft.id)}>
+          Отклонить
+        </Btn>
+      </div>
+    </Card>
+  );
+}
+
+function DraftCard({
+  draft,
+  onSend,
+  onDiscard,
+}: {
+  draft: Draft;
+  onSend: (id: string, msg: string) => void;
+  onDiscard: (id: string) => void;
+}) {
+  const [text, setText] = useState(draft.draft_text);
+  return (
+    <Card style={{ display: "grid", gap: 10 }}>
+      {draft.reason && (
+        <div style={{ fontSize: 13, color: "var(--muted)" }}>Причина: {draft.reason}</div>
+      )}
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={4}
+        style={{
+          width: "100%",
+          resize: "vertical",
+          padding: 10,
+          borderRadius: 12,
+          border: "1px solid var(--line)",
+          background: "var(--bg-deep)",
+          color: "var(--ink)",
+          fontSize: 14,
+          lineHeight: 1.4,
+        }}
+      />
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn kind="primary" size="sm" onClick={() => onSend(draft.id, text)}>
+          Отправить
+        </Btn>
+        <Btn kind="ghost" size="sm" onClick={() => onDiscard(draft.id)}>
+          Отклонить
+        </Btn>
+      </div>
+    </Card>
+  );
+}
+
+export default function RecruiterPage() {
+  const { drafts, todos, loading, error, sendDraft, discardDraft, resolveTodo } = useRecruiter();
+  const {
+    drafts: formDrafts,
+    loading: formLoading,
+    error: formError,
+    approve: approveForm,
+    discard: discardForm,
+  } = useFormDrafts();
+
+  return (
+    <>
+      <Topbar
+        greeting="Переписка"
+        subtitle={`${formDrafts.length} тестов · ${drafts.length} черновиков · ${todos.length} задач`}
+      />
+
+      {error && <div style={{ color: "var(--err)", padding: 16 }}>{error}</div>}
+      {formError && <div style={{ color: "var(--err)", padding: 16 }}>{formError}</div>}
+      {loading || formLoading ? (
+        <div style={{ padding: 16, color: "var(--muted)" }}>Загрузка…</div>
+      ) : (
+        <div style={{ display: "grid", gap: 28, padding: 16 }}>
+          <section style={{ display: "grid", gap: 12 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 700 }}>
+              Тесты вакансий на аппрув ({formDrafts.length})
+            </h2>
+            {formDrafts.length === 0 && (
+              <div style={{ fontSize: 14, color: "var(--muted)" }}>
+                Нет тестов на проверку.
+              </div>
+            )}
+            {formDrafts.map((f) => (
+              <FormDraftCard
+                key={f.id}
+                draft={f}
+                onApprove={approveForm}
+                onDiscard={discardForm}
+              />
+            ))}
+          </section>
+
+          <section style={{ display: "grid", gap: 12 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 700 }}>Черновики ответов ({drafts.length})</h2>
+            {drafts.length === 0 && (
+              <div style={{ fontSize: 14, color: "var(--muted)" }}>Нет черновиков.</div>
+            )}
+            {drafts.map((d) => (
+              <DraftCard key={d.id} draft={d} onSend={sendDraft} onDiscard={discardDraft} />
+            ))}
+          </section>
+
+          <section style={{ display: "grid", gap: 12 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 700 }}>Задачи ({todos.length})</h2>
+            {todos.length === 0 && (
+              <div style={{ fontSize: 14, color: "var(--muted)" }}>Нет задач.</div>
+            )}
+            {todos.map((t) => (
+              <Card key={t.id} style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontWeight: 600 }}>{t.title}</div>
+                {t.detail && <div style={{ fontSize: 14 }}>{t.detail}</div>}
+                {t.link && (
+                  <a
+                    href={t.link}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ fontSize: 14, color: "var(--coral)", textDecoration: "underline" }}
+                  >
+                    {t.link}
+                  </a>
+                )}
+                <div style={{ display: "flex", gap: 8, paddingTop: 4 }}>
+                  <Btn kind="primary" size="sm" onClick={() => resolveTodo(t.id, "done")}>
+                    Готово
+                  </Btn>
+                  <Btn kind="ghost" size="sm" onClick={() => resolveTodo(t.id, "dismiss")}>
+                    Скрыть
+                  </Btn>
+                </div>
+              </Card>
+            ))}
+          </section>
+        </div>
+      )}
+    </>
+  );
+}

@@ -6,23 +6,22 @@ import { createClient } from "@/lib/supabase/client";
 import {
   IHome,
   IList,
-  IFilter,
   IBell,
   IMail,
+  IDoc,
   IUser,
   ISettings,
   ILogo,
   ILogout,
 } from "@/components/otclick/icons";
-import { openFiltersDrawer } from "@/components/filters-drawer";
 
-type Item = { href?: string; id: string; icon: React.ReactNode; label: string; action?: "filters" | "signout" };
+type Item = { href?: string; id: string; icon: React.ReactNode; label: string; action?: "signout" };
 
 const NAV: Item[] = [
   { id: "dashboard", href: "/dashboard", icon: <IHome />, label: "Главная" },
   { id: "applications", href: "/applications", icon: <IList />, label: "Отклики" },
-  { id: "recruiter", href: "/recruiter", icon: <IMail />, label: "Переписка" },
-  { id: "filters", icon: <IFilter />, label: "Фильтры", action: "filters" },
+  { id: "chats", href: "/chats", icon: <IMail />, label: "Чаты" },
+  { id: "todo", href: "/todo", icon: <IDoc />, label: "Todo" },
   { id: "notifications", href: "/notifications", icon: <IBell />, label: "Уведомления" },
   { id: "account", href: "/account", icon: <IUser />, label: "Аккаунт" },
 ];
@@ -133,14 +132,7 @@ export default function Sidebar({ email }: { email: string | null }) {
       >
         {NAV.map((it) => {
           const active = !it.action && it.href ? pathname.startsWith(it.href) : false;
-          return (
-            <SidebarBtn
-              key={it.id}
-              item={it}
-              active={active}
-              onClick={it.action === "filters" ? openFiltersDrawer : undefined}
-            />
-          );
+          return <SidebarBtn key={it.id} item={it} active={active} />;
         })}
       </div>
       <div style={{ flex: 1 }} />

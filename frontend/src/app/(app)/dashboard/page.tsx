@@ -1,8 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import Topbar from "@/components/otclick/topbar";
 import HHBanner from "@/components/otclick/hh-banner";
-import TodayResultsCard from "./today-results-card";
-import ActivityCalendar from "./activity-calendar";
 import LimitRing from "./limit-ring";
 import WeeklyPlan from "./weekly-plan";
 import QuickActions from "./quick-actions";
@@ -31,19 +29,8 @@ export default async function DashboardPage() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "minmax(0, 1.45fr) minmax(0, 1fr)",
-          gap: 18,
-        }}
-      >
-        <TodayResultsCard />
-        <ActivityCalendar />
-      </div>
-      <div
-        style={{
-          display: "grid",
           gridTemplateColumns: "1fr 1fr 1fr",
           gap: 18,
-          marginTop: 18,
         }}
       >
         <LimitRing />

@@ -9,32 +9,41 @@ import Topbar from "@/components/otclick/topbar";
 
 const ICON: Record<string, React.ReactNode> = {
   captcha: <IShield size={14} />,
-  apply_success: <ICheck size={14} />,
   limit_reached: <IBolt size={14} />,
   token_dead: <IClose size={14} />,
   account_banned: <IClose size={14} />,
   worker_stop: <ILink size={14} />,
   resume_missing: <ILink size={14} />,
+  recruiter_todo: <ICheck size={14} />,
+  recruiter_draft: <ICheck size={14} />,
+  form_approval: <ICheck size={14} />,
+  cover_letter_written: <ICheck size={14} />,
 };
 
 const COLOR: Record<string, string> = {
   captcha: "var(--coral)",
-  apply_success: "var(--ok)",
   limit_reached: "var(--yellow)",
   token_dead: "var(--err)",
   account_banned: "var(--err)",
   worker_stop: "var(--muted-2)",
   resume_missing: "var(--muted-2)",
+  recruiter_todo: "var(--ok)",
+  recruiter_draft: "var(--ok)",
+  form_approval: "var(--yellow)",
+  cover_letter_written: "var(--ok)",
 };
 
 const TITLE: Record<string, string> = {
-  apply_success: "Отклик отправлен",
   captcha: "Нужна капча",
   limit_reached: "Достигнут дневной лимит",
   worker_stop: "Worker остановлен",
   token_dead: "Токен hh умер",
   account_banned: "Аккаунт hh заблокирован",
   resume_missing: "Резюме недоступно",
+  recruiter_todo: "Новая задача от рекрутёра",
+  recruiter_draft: "Черновик ответа рекрутёру",
+  form_approval: "Анкета ждёт подтверждения",
+  cover_letter_written: "ИИ написал сопроводительное",
 };
 
 function bucketLabel(d: Date): string {

@@ -20,6 +20,8 @@ from typing import Literal
 from app.db.supabase import service_client
 from app.hh import errors as hh_errors
 from app.services import captcha as captcha_service
+from app.services import form_drafts
+from app.services import notifications
 from app.ai.agent import HHAgent
 from app.services.hh_credentials import (
     HHCredentialsInvalid,
@@ -33,6 +35,7 @@ logger = logging.getLogger(__name__)
 ApplyStatus = Literal[
     "sent",
     "form_sent",
+    "form_pending",
     "failed",
     "captcha",
     "skipped",
@@ -103,7 +106,8 @@ def _already_applied(user_id: str, vacancy_id: str) -> bool:
     )
     if not res.data:
         return False
-    # form_required pre-record is not a real attempt — allow re-evaluation
+    # form_required pre-record is not a real attempt — allow re-evaluation.
+    # form_pending = AI answers waiting for user approval; do not re-queue.
     return res.data[0].get("status") != "form_required"
 
 
@@ -239,7 +243,8 @@ async def apply_one(
         employer_id = _extract_employer_id(vacancy)
 
         # Has-test check survives the producer race: vacancy may have flipped
-        # has_test=true between search and apply.
+        # has_test=true between search and apply. AI generates answers but the
+        # worker NEVER auto-submits — drop a form_draft for user approval.
         if vacancy.get("has_test") is True:
             fill_status, form_answers = await agent.write_form_answers(
                 user_id, resume_uuid, vacancy
@@ -248,6 +253,21 @@ async def apply_one(
                 "apply: vacancy=%s has_test=true → fill_status=%s",
                 vacancy_id, fill_status,
             )
+            if fill_status == "form_pending":
+                await form_drafts.insert_draft(
+                    user_id=user_id,
+                    resume_id=resume_uuid,
+                    vacancy=vacancy,
+                    answers=form_answers,
+                )
+                await notifications.notify(
+                    user_id, "form_approval",
+                    {
+                        "vacancy_id": vacancy_id,
+                        "vacancy_title": vacancy.get("name"),
+                        "employer": (vacancy.get("employer") or {}).get("name"),
+                    },
+                )
             await loop.run_in_executor(
                 None,
                 lambda: _record_application(
@@ -256,7 +276,7 @@ async def apply_one(
                     vacancy_id=vacancy_id,
                     status=fill_status,
                     cover_letter=None,
-                    error=None if fill_status == "form_sent" else "vacancy.has_test",
+                    error=None if fill_status == "form_pending" else "vacancy.has_test",
                     employer_id=employer_id,
                     form_answers=form_answers or None,
                 ),
@@ -273,6 +293,16 @@ async def apply_one(
                     resume=resume,
                     resume_uuid=resume_uuid,
                 )
+                if cover_letter:
+                    await notifications.notify(
+                        user_id,
+                        "cover_letter_written",
+                        {
+                            "vacancy_id": vacancy_id,
+                            "vacancy_title": vacancy.get("name"),
+                            "employer": (vacancy.get("employer") or {}).get("name"),
+                        },
+                    )
             except Exception:
                 logger.exception(
                     "apply: cover letter generation failed for vacancy=%s — using empty letter and failing",
