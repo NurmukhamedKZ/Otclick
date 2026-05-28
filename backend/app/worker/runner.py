@@ -26,6 +26,7 @@ from app.services.hh_credentials import (
     persist_if_refreshed,
 )
 from app.services.notifications import notify
+from app.services.worker_runtime import heartbeat
 from app.worker import limiter, throttle
 from app.worker.queue import ApplyJob, drop_user_queue, get_user_queue
 from app.worker.recruiter_poll import poll_recruiter_chats
@@ -148,6 +149,17 @@ async def _run_loop(handle: RunnerHandle) -> None:
     rng = random.Random()
     logger.info("runner: user=%s loop START", user_id)
 
+    async def _hb() -> None:
+        await heartbeat(
+            user_id,
+            state=handle.state,
+            queued=queue.qsize(),
+            today_count=handle.today_count,
+            next_run_at=handle.next_run_at,
+            last_error=handle.last_error,
+        )
+
+    await _hb()
     while True:
         logger.debug(
             "runner: user=%s tick state=%s queue=%d today=%d",
@@ -171,12 +183,14 @@ async def _run_loop(handle: RunnerHandle) -> None:
                     await captcha_service.mark_solved(user_id)
                     await notify(user_id, "captcha", {"resolved": True})
                     handle.state = "running"
+                    await _hb()
                     logger.info("user %s: captcha cleared — resuming", user_id)
                 elif result == "token_dead":
                     handle.state = "stopped"
                     handle.last_error = "hh token dead — reconnect required"
                     await notify(user_id, "token_dead", {})
                     await notify(user_id, "worker_stop", {"reason": "token_dead"})
+                    await _hb()
                     logger.error(
                         "user %s: token dead during captcha probe — stopping", user_id
                     )
@@ -186,6 +200,7 @@ async def _run_loop(handle: RunnerHandle) -> None:
                     handle.last_error = "hh account banned"
                     await notify(user_id, "account_banned", {})
                     await notify(user_id, "worker_stop", {"reason": "account_banned"})
+                    await _hb()
                     logger.error(
                         "user %s: account banned during captcha probe — stopping", user_id
                     )
@@ -198,6 +213,7 @@ async def _run_loop(handle: RunnerHandle) -> None:
         check = await limiter.check(user_id)
         if check == "limit_day":
             handle.state = "paused_limit"
+            handle.last_error = "daily limit"
             sleep_s = await asyncio.get_running_loop().run_in_executor(
                 None, _seconds_until_next_local_midnight, user_id
             )
@@ -205,16 +221,23 @@ async def _run_loop(handle: RunnerHandle) -> None:
             await notify(
                 user_id, "limit_reached", {"source": "local_day", "sleep_s": int(sleep_s)}
             )
+            await _hb()
             logger.info("user %s: daily limit, sleeping %.0fs", user_id, sleep_s)
             await asyncio.sleep(sleep_s)
             handle.state = "running"
+            handle.last_error = None
+            await _hb()
             continue
         if check == "limit_hour":
             handle.state = "paused_limit"
+            handle.last_error = "hourly limit"
             handle.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=HOUR_COOLDOWN_S)
+            await _hb()
             logger.info("user %s: hourly limit, sleeping %ds", user_id, HOUR_COOLDOWN_S)
             await asyncio.sleep(HOUR_COOLDOWN_S)
             handle.state = "running"
+            handle.last_error = None
+            await _hb()
             continue
 
         # Refill queue when empty.
@@ -225,6 +248,7 @@ async def _run_loop(handle: RunnerHandle) -> None:
                 logger.exception("producer failed for %s", user_id)
                 pushed, skipped_has_test = 0, 0
             handle.skipped_has_test += skipped_has_test
+            await _hb()
             if pushed == 0:
                 handle.next_run_at = datetime.now(timezone.utc) + timedelta(
                     seconds=IDLE_REFILL_SLEEP_S
@@ -234,6 +258,7 @@ async def _run_loop(handle: RunnerHandle) -> None:
                     user_id,
                     IDLE_REFILL_SLEEP_S,
                 )
+                await _hb()
                 await asyncio.sleep(IDLE_REFILL_SLEEP_S)
                 continue
 
@@ -270,6 +295,7 @@ async def _run_loop(handle: RunnerHandle) -> None:
         logger.info(
             "runner: user=%s vacancy=%s status=%s", user_id, job.vacancy_id, status
         )
+        await _hb()
 
         if status in ("sent", "form_sent"):
             handle.today_count = await limiter.increment(user_id)
@@ -280,6 +306,7 @@ async def _run_loop(handle: RunnerHandle) -> None:
             handle.last_error = f"captcha on vacancy {job.vacancy_id}"
             logger.warning("user %s: captcha — pausing", user_id)
             await notify(user_id, "captcha", {"vacancy_id": job.vacancy_id})
+            await _hb()
         elif status == "limit_day":
             # hh told us we're done for the day — bump local to cap, then pause.
             handle.state = "paused_limit"
@@ -301,12 +328,14 @@ async def _run_loop(handle: RunnerHandle) -> None:
             await notify(user_id, "token_dead", {"vacancy_id": job.vacancy_id})
             await notify(user_id, "worker_stop", {"reason": "token_dead"})
             logger.error("user %s: token dead — stopping runner", user_id)
+            await _hb()
             return
         elif status == "account_banned":
             handle.state = "stopped"
             handle.last_error = "hh account banned"
             await notify(user_id, "account_banned", {"vacancy_id": job.vacancy_id})
             await notify(user_id, "worker_stop", {"reason": "account_banned"})
+            await _hb()
             logger.error("user %s: account banned — stopping runner", user_id)
             return
         elif status == "form_required":
@@ -370,6 +399,10 @@ class WorkerRegistry:
         except (asyncio.CancelledError, Exception):
             pass
         drop_user_queue(user_id)
+        try:
+            await heartbeat(user_id, state="stopped", queued=0, next_run_at=None)
+        except Exception:
+            logger.warning("worker_runtime stop heartbeat failed for %s", user_id, exc_info=True)
         return True
 
     def get(self, user_id: str) -> RunnerHandle | None:

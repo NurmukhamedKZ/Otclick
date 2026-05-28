@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 PER_PAGE = 50
 MAX_PUSH_PER_RUN = 100
+MAX_PAGES_PER_FILTER = 20
 
 
 def _load_enabled_filters(user_id: str) -> list[dict]:
@@ -102,34 +103,6 @@ async def produce_jobs(user_id: str) -> tuple[int, int]:
         for f in filters:
             if pushed >= MAX_PUSH_PER_RUN:
                 break
-            params = _filter_to_search_params(f)
-            params["per_page"] = PER_PAGE
-            params["page"] = 0
-            logger.info(
-                "producer: user=%s filter=%s search params=%s",
-                user_id,
-                f.get("id"),
-                params,
-            )
-            try:
-                payload = await loop.run_in_executor(
-                    None, lambda p=params: client.get("vacancies", p)
-                )
-            except Exception:
-                logger.exception("vacancy search failed for filter %s", f.get("id"))
-                continue
-
-            items = payload.get("items", []) if isinstance(payload, dict) else []
-            found_total = payload.get("found") if isinstance(payload, dict) else None
-            logger.info(
-                "producer: user=%s filter=%s hh returned items=%d found=%s",
-                user_id,
-                f.get("id"),
-                len(items),
-                found_total,
-            )
-            if not items:
-                continue
 
             excluded_pat: re.Pattern | None = None
             if f.get("excluded_regex"):
@@ -138,77 +111,116 @@ async def produce_jobs(user_id: str) -> tuple[int, int]:
                 except re.error:
                     logger.warning("invalid excluded_regex on filter %s", f.get("id"))
 
-            vacancy_ids = [str(it["id"]) for it in items if it.get("id")]
-            employer_ids = [
-                str((it.get("employer") or {}).get("id"))
-                for it in items
-                if (it.get("employer") or {}).get("id")
-            ]
-            already = await loop.run_in_executor(
-                None, _existing_vacancy_ids, user_id, vacancy_ids
-            )
-            blacklisted = await loop.run_in_executor(
-                None, _blacklisted_employer_ids, user_id, employer_ids
-            )
-            logger.info(
-                "producer: user=%s filter=%s already_applied=%d blacklisted=%d",
-                user_id,
-                f.get("id"),
-                len(already),
-                len(blacklisted),
-            )
-
             skipped_already = 0
             skipped_blacklist = 0
             skipped_excluded = 0
             skipped_has_test = 0
             skipped_relations = 0
             relations_blacklist: dict[str, str | None] = {}
-            for it in items:
+            pages = 0
+            total_found: int | None = None
+
+            for page in range(MAX_PAGES_PER_FILTER):
                 if pushed >= MAX_PUSH_PER_RUN:
                     break
-                vid = str(it.get("id") or "")
-                if not vid or vid in already:
-                    skipped_already += 1
-                    continue
-                # Non-empty relations = already interacted with this vacancy
-                # (responded / invited / rejected) → skip + blacklist employer
-                # so we never re-apply to the same company.
-                if it.get("relations"):
-                    skipped_relations += 1
-                    emp = it.get("employer") or {}
-                    if emp.get("id"):
-                        relations_blacklist[str(emp["id"])] = emp.get("name")
-                    continue
-                # has_test vacancies are NOT skipped — they fall through to the
-                # queue and apply_one solves the test via the web session
-                # (form_filler). It records form_sent on success, form_required
-                # on failure, without burning an API apply attempt.
-                emp_id = (it.get("employer") or {}).get("id")
-                if emp_id and str(emp_id) in blacklisted:
-                    skipped_blacklist += 1
-                    continue
-                if _matches_excluded(it, excluded_pat):
-                    skipped_excluded += 1
-                    continue
-                await queue.put(
-                    ApplyJob(
-                        user_id=user_id,
-                        resume_id=f["resume_id"],
-                        vacancy_id=vid,
-                        filter_id=f.get("id"),
-                    )
+                params = _filter_to_search_params(f)
+                params["per_page"] = PER_PAGE
+                params["page"] = page
+                logger.info(
+                    "producer: user=%s filter=%s search params=%s",
+                    user_id,
+                    f.get("id"),
+                    params,
                 )
-                pushed += 1
+                try:
+                    payload = await loop.run_in_executor(
+                        None, lambda p=params: client.get("vacancies", p)
+                    )
+                except Exception:
+                    logger.exception("vacancy search failed for filter %s", f.get("id"))
+                    break
+
+                items = payload.get("items", []) if isinstance(payload, dict) else []
+                total_found = payload.get("found") if isinstance(payload, dict) else None
+                pages_total = payload.get("pages") if isinstance(payload, dict) else None
+                logger.info(
+                    "producer: user=%s filter=%s page=%d items=%d found=%s pages=%s",
+                    user_id,
+                    f.get("id"),
+                    page,
+                    len(items),
+                    total_found,
+                    pages_total,
+                )
+                if not items:
+                    break
+
+                vacancy_ids = [str(it["id"]) for it in items if it.get("id")]
+                employer_ids = [
+                    str((it.get("employer") or {}).get("id"))
+                    for it in items
+                    if (it.get("employer") or {}).get("id")
+                ]
+                already = await loop.run_in_executor(
+                    None, _existing_vacancy_ids, user_id, vacancy_ids
+                )
+                blacklisted = await loop.run_in_executor(
+                    None, _blacklisted_employer_ids, user_id, employer_ids
+                )
+
+                for it in items:
+                    if pushed >= MAX_PUSH_PER_RUN:
+                        break
+                    vid = str(it.get("id") or "")
+                    if not vid or vid in already:
+                        skipped_already += 1
+                        continue
+                    # Non-empty relations = already interacted with this vacancy
+                    # (responded / invited / rejected) → skip + blacklist employer
+                    # so we never re-apply to the same company.
+                    if it.get("relations"):
+                        skipped_relations += 1
+                        emp = it.get("employer") or {}
+                        if emp.get("id"):
+                            relations_blacklist[str(emp["id"])] = emp.get("name")
+                        continue
+                    # has_test vacancies are NOT skipped — they fall through to the
+                    # queue and apply_one solves the test via the web session
+                    # (form_filler). It records form_sent on success, form_required
+                    # on failure, without burning an API apply attempt.
+                    emp_id = (it.get("employer") or {}).get("id")
+                    if emp_id and str(emp_id) in blacklisted:
+                        skipped_blacklist += 1
+                        continue
+                    if _matches_excluded(it, excluded_pat):
+                        skipped_excluded += 1
+                        continue
+                    await queue.put(
+                        ApplyJob(
+                            user_id=user_id,
+                            resume_id=f["resume_id"],
+                            vacancy_id=vid,
+                            filter_id=f.get("id"),
+                        )
+                    )
+                    pushed += 1
+
+                pages += 1
+                if pages_total is not None and page + 1 >= pages_total:
+                    break
+                if len(items) < PER_PAGE:
+                    break
+
             if relations_blacklist:
                 await loop.run_in_executor(
                     None, bulk_auto_blacklist, user_id, relations_blacklist
                 )
             logger.info(
-                "producer: user=%s filter=%s skipped already=%d blacklist=%d "
+                "producer: user=%s filter=%s pages=%d skipped already=%d blacklist=%d "
                 "excluded=%d has_test=%d relations=%d",
                 user_id,
                 f.get("id"),
+                pages,
                 skipped_already,
                 skipped_blacklist,
                 skipped_excluded,

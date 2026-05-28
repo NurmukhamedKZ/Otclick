@@ -146,21 +146,62 @@ def _ai_answer(chat: BaseChatModel, prompt: str) -> str:
 
 
 def _resume_summary(resume: dict) -> str:
-    """Compact text of the resume to ground test answers. Bounded ~2000 chars."""
+    """Full resume text to ground LLM. No truncation — user requirement."""
     parts: list[str] = []
     if resume.get("title"):
         parts.append(f"Желаемая должность: {resume['title']}")
+    if resume.get("first_name") or resume.get("last_name"):
+        fio = " ".join(
+            str(resume.get(k) or "") for k in ("last_name", "first_name", "middle_name")
+        ).strip()
+        if fio:
+            parts.append(f"ФИО: {fio}")
+    for k, label in (
+        ("age", "Возраст"),
+        ("gender", "Пол"),
+        ("area", "Город"),
+        ("citizenship", "Гражданство"),
+        ("relocation", "Релокация"),
+        ("business_trip_readiness", "Командировки"),
+        ("employments", "Занятость"),
+        ("schedules", "График"),
+        ("total_experience", "Общий опыт"),
+        ("salary", "Зарплата"),
+    ):
+        v = resume.get(k)
+        if v:
+            if isinstance(v, dict):
+                v = v.get("name") or v.get("title") or v
+            elif isinstance(v, list):
+                v = ", ".join(
+                    str((x.get("name") if isinstance(x, dict) else x) or "") for x in v
+                )
+            parts.append(f"{label}: {v}")
     skills = resume.get("skill_set") or []
     if skills:
-        parts.append("Навыки: " + ", ".join(str(s) for s in skills[:30]))
+        parts.append("Навыки: " + ", ".join(str(s) for s in skills))
     if resume.get("skills"):
-        parts.append("О себе: " + _strip_tags(resume["skills"])[:600])
-    for e in (resume.get("experience") or [])[:4]:
+        parts.append("О себе: " + _strip_tags(resume["skills"]))
+    for e in resume.get("experience") or []:
         pos = e.get("position") or ""
         comp = e.get("company") or ""
-        desc = _strip_tags(e.get("description"))[:300]
-        parts.append(f"Опыт: {pos} @ {comp}. {desc}".strip())
-    return "\n".join(parts)[:2000]
+        start = e.get("start") or ""
+        end = e.get("end") or "наст.вр."
+        desc = _strip_tags(e.get("description"))
+        parts.append(f"Опыт ({start}–{end}): {pos} @ {comp}. {desc}".strip())
+    for ed in resume.get("education", {}).get("primary", []) if isinstance(resume.get("education"), dict) else []:
+        parts.append(
+            f"Образование: {ed.get('name','')} — {ed.get('result','')} ({ed.get('year','')})".strip()
+        )
+    for lang in resume.get("language") or []:
+        if isinstance(lang, dict):
+            parts.append(
+                f"Язык: {lang.get('name','')} — {(lang.get('level') or {}).get('name','')}".strip()
+            )
+    for cert in resume.get("certificate") or []:
+        if isinstance(cert, dict):
+            parts.append(f"Сертификат: {cert.get('title','')} ({cert.get('achieved_at','')})".strip())
+    return "\n".join(parts)
 
 
 def _parse_tests(page_html: str, vacancy_id: str) -> dict:

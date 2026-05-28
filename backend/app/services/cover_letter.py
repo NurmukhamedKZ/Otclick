@@ -53,21 +53,22 @@ def _build_fallback(vacancy: dict, resume: dict) -> str:
 
 
 def _build_prompt(vacancy: dict, resume: dict) -> str:
+    from app.services.form_filler import _resume_summary
+
     parts = [
         f"Вакансия: {vacancy.get('name', '')}",
         f"Компания: {(vacancy.get('employer') or {}).get('name', '')}",
     ]
     desc = vacancy.get("description") or ""
     if desc:
-        # strip HTML tags cheaply
         desc = re.sub(r"<[^>]+>", " ", desc)
         desc = re.sub(r"\s+", " ", desc).strip()
-        parts.append(f"Описание: {desc[:1500]}")
+        parts.append(f"Описание: {desc}")
     snippet = vacancy.get("snippet") or {}
     req = snippet.get("requirement") or ""
     if req:
         parts.append(f"Требования: {re.sub(r'<[^>]+>', '', req)}")
-    parts.append(f"Резюме (заголовок): {resume.get('title', '')}")
+    parts.append("Резюме кандидата:\n" + _resume_summary(resume))
     return "\n".join(parts)
 
 

@@ -106,6 +106,9 @@ class HHAgent:
         )
         await self._recruiter_agent.ainvoke(
             {"messages": history},
-            config={"configurable": {"thread_id": negotiation_id}},
+            config={
+                "configurable": {"thread_id": negotiation_id},
+                "metadata": {"thread_id": negotiation_id, "session_id": negotiation_id},
+            },
             context=ctx,
         )

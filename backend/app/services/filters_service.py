@@ -128,7 +128,11 @@ async def get_filter(user_id: str, filter_id: str) -> dict:
 
 
 def _filter_to_search_params(f: dict) -> dict[str, Any]:
-    params: dict[str, Any] = {"per_page": PREVIEW_PER_PAGE, "page": 0}
+    params: dict[str, Any] = {
+        "per_page": PREVIEW_PER_PAGE,
+        "page": 0,
+        "order_by": "publication_time",
+    }
     if f.get("text"):
         params["text"] = f["text"]
     if f.get("area") is not None:
