@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/client";
 import type { NotificationRow } from "@/lib/types";
 import { Btn, Card } from "@/components/otclick/ui";
 import { IBolt, ICheck, IClose, ILink, IShield, ITrash } from "@/components/otclick/icons";
-import Topbar from "@/components/otclick/topbar";
 
 const ICON: Record<string, React.ReactNode> = {
   captcha: <IShield size={14} />,
@@ -132,7 +131,6 @@ export default function NotificationsPage() {
 
   return (
     <>
-      <Topbar greeting="Уведомления" subtitle={`последние ${rows?.length ?? 0} событий`} />
       <Card>
         <div
           style={{

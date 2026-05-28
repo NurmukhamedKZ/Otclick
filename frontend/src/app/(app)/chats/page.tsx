@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import Topbar from "@/components/otclick/topbar";
 import { Btn, Card, Tag, Toggle, type TagTone } from "@/components/otclick/ui";
 import { IRefresh, ISearch } from "@/components/otclick/icons";
 import {
@@ -532,7 +531,6 @@ export default function ChatsPage() {
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <Topbar greeting="Мои чаты" />
       <Card
         style={{
           padding: 0,

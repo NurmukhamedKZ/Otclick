@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import type {
@@ -9,8 +10,9 @@ import type {
   WorkerStopResponse,
 } from "@/lib/types";
 import { StatusDot } from "@/components/otclick/ui";
-import { IPause, IPlay, IRefresh } from "@/components/otclick/icons";
+import { IBolt, IFilter, IPause, IPlay, IRefresh } from "@/components/otclick/icons";
 import { pushToast } from "@/components/toaster";
+import { openFiltersDrawer } from "@/components/filters-drawer";
 
 const STATE_LABEL: Record<WorkerStatus["state"], string> = {
   running: "работает",
@@ -148,6 +150,45 @@ export default function WorkerBar() {
         </div>
       )}
       <div style={{ flex: 1 }} />
+      <button
+        type="button"
+        onClick={openFiltersDrawer}
+        style={{
+          border: "none",
+          background: "#ffffff15",
+          color: "#F5F1E6",
+          borderRadius: 999,
+          padding: "8px 14px",
+          fontWeight: 600,
+          fontSize: 13,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          cursor: "pointer",
+        }}
+      >
+        <IFilter size={14} /> Фильтры
+      </button>
+      <Link href="/billing" style={{ textDecoration: "none" }}>
+        <button
+          type="button"
+          style={{
+            border: "none",
+            background: "var(--yellow)",
+            color: "var(--ink)",
+            borderRadius: 999,
+            padding: "8px 14px",
+            fontWeight: 600,
+            fontSize: 13,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            cursor: "pointer",
+          }}
+        >
+          <IBolt size={14} /> Pro
+        </button>
+      </Link>
       <button
         type="button"
         disabled={busy}

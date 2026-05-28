@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/client";
 import type { Application } from "@/lib/types";
 import { Btn, Card, Tag } from "@/components/otclick/ui";
 import { IExternal, IRefresh, ISearch } from "@/components/otclick/icons";
-import Topbar from "@/components/otclick/topbar";
 
 const PAGE_SIZE = 25;
 
@@ -143,7 +142,6 @@ export default function ApplicationsPage() {
 
   return (
     <>
-      <Topbar greeting="Все отклики" subtitle={`${counts.all ?? total} всего`} />
       <Card style={{ marginBottom: 18 }}>
         <div
           style={{

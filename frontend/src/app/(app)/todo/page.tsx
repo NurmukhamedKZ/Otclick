@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import Topbar from "@/components/otclick/topbar";
 import { Btn, Card } from "@/components/otclick/ui";
 import { useRecruiter, type Draft } from "@/hooks/useRecruiter";
 import { useFormDrafts, type FormAnswer, type FormDraft } from "@/hooks/useFormDrafts";
@@ -283,11 +282,6 @@ export default function RecruiterPage() {
 
   return (
     <>
-      <Topbar
-        greeting="Задачи на подтверждение"
-        subtitle={`${formDrafts.length} тестов · ${drafts.length} черновиков · ${todos.length} задач`}
-      />
-
       {error && <div style={{ color: "var(--err)", padding: 16 }}>{error}</div>}
       {formError && <div style={{ color: "var(--err)", padding: 16 }}>{formError}</div>}
       {loading || formLoading ? (

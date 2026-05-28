@@ -1,5 +1,3 @@
-import { createClient } from "@/lib/supabase/server";
-import Topbar from "@/components/otclick/topbar";
 import HHBanner from "@/components/otclick/hh-banner";
 import LimitRing from "./limit-ring";
 import WeeklyPlan from "./weekly-plan";
@@ -8,23 +6,9 @@ import RecentApplicationsCard from "./recent-applications-card";
 import ResumesCard from "./resumes-card";
 import NotificationsCard from "./notifications-card";
 
-function greetingFor(email: string | null): string {
-  const name = email ? email.split("@")[0].split(/[._-]/)[0] : "там";
-  return `Привет, ${name[0]?.toUpperCase() ?? ""}${name.slice(1)}`;
-}
-
 export default async function DashboardPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
   return (
     <>
-      <Topbar
-        greeting={greetingFor(user?.email ?? null)}
-        subtitle="Посмотрим, что бот сделал за тебя сегодня"
-      />
       <HHBanner />
       <div
         style={{

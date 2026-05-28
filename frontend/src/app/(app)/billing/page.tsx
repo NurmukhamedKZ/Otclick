@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
 import { Btn, Card, Tag } from "@/components/otclick/ui";
 import { IBolt, ICheck } from "@/components/otclick/icons";
-import Topbar from "@/components/otclick/topbar";
 import type { BillingStatus, SubscribeParams } from "@/lib/types";
 import { pushToast } from "@/components/toaster";
 
@@ -136,8 +135,6 @@ export default function BillingPage() {
 
   return (
     <>
-      <Topbar greeting="Биллинг" subtitle={`тариф ${plan}`} />
-
       {status && !status.has_access && (
         <div
           style={{

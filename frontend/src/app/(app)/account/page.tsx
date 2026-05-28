@@ -7,7 +7,6 @@ import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
 import { Btn, Card, Field, Tag } from "@/components/otclick/ui";
 import { ICheck, ILink, IPower, IRefresh, ITelegram } from "@/components/otclick/icons";
-import Topbar from "@/components/otclick/topbar";
 
 type Tab = "profile" | "plan" | "integrations" | "danger";
 
@@ -132,8 +131,6 @@ export default function AccountPage() {
 
   return (
     <>
-      <Topbar greeting="Аккаунт" subtitle={email ?? userId ?? "…"} />
-
       <div style={{ display: "flex", alignItems: "center", gap: 18, marginBottom: 18, flexWrap: "wrap" }}>
         <div
           style={{
