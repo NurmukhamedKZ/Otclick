@@ -88,16 +88,22 @@ class HHAgent:
     async def answer_recruiter(
         self, negotiation_id: str, message_id: str,
         history: list[tuple[str, str]], client,
+        question_text: str | None = None,
     ) -> None:
         """Decide + act on the latest recruiter message via tools (send/escalate/
-        todo) or no-op. Conversation memory keyed by negotiation_id."""
+        todo) or no-op. Conversation memory keyed by negotiation_id. The
+        `question_text` is the verbatim recruiter message and is persisted
+        with any draft so the user can review it on the Todo screen."""
         if not settings.OPENAI_API_KEY:
             logger.info("recruiter: no OPENAI_API_KEY — skipping chat %s", negotiation_id)
             return
         if self._recruiter_agent is None:
             summary = await self._load_resume_summary()
             self._recruiter_agent = self._build_recruiter_agent(build_recruiter_prompt(summary))
-        ctx = RecruiterContext(self.user_id, negotiation_id, message_id, client)
+        ctx = RecruiterContext(
+            self.user_id, negotiation_id, message_id, client,
+            question_text=question_text,
+        )
         await self._recruiter_agent.ainvoke(
             {"messages": history},
             config={"configurable": {"thread_id": negotiation_id}},

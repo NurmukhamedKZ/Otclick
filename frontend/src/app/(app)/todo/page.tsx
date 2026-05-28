@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import Topbar from "@/components/otclick/topbar";
 import { Btn, Card } from "@/components/otclick/ui";
 import { useRecruiter, type Draft } from "@/hooks/useRecruiter";
@@ -125,34 +126,146 @@ function DraftCard({
   onDiscard: (id: string) => void;
 }) {
   const [text, setText] = useState(draft.draft_text);
+  const [editing, setEditing] = useState(false);
+  const [buf, setBuf] = useState(draft.draft_text);
   return (
     <Card style={{ display: "grid", gap: 10 }}>
+      {draft.question_text && (
+        <div
+          style={{
+            background: "var(--bg-deep)",
+            borderLeft: "3px solid var(--coral)",
+            borderRadius: 10,
+            padding: "10px 12px",
+            display: "grid",
+            gap: 4,
+          }}
+        >
+          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
+            Вопрос рекрутёра
+          </div>
+          <div
+            style={{
+              fontSize: 14,
+              lineHeight: 1.45,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              color: "var(--ink)",
+            }}
+          >
+            {draft.question_text}
+          </div>
+        </div>
+      )}
       {draft.reason && (
         <div style={{ fontSize: 13, color: "var(--muted)" }}>Причина: {draft.reason}</div>
       )}
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        rows={4}
+      <div
         style={{
-          width: "100%",
-          resize: "vertical",
-          padding: 10,
-          borderRadius: 12,
-          border: "1px solid var(--line)",
           background: "var(--bg-deep)",
-          color: "var(--ink)",
-          fontSize: 14,
-          lineHeight: 1.4,
+          borderLeft: "3px solid var(--ink)",
+          borderRadius: 10,
+          padding: "10px 12px",
+          display: "grid",
+          gap: 6,
         }}
-      />
-      <div style={{ display: "flex", gap: 8 }}>
-        <Btn kind="primary" size="sm" onClick={() => onSend(draft.id, text)}>
-          Отправить
-        </Btn>
-        <Btn kind="ghost" size="sm" onClick={() => onDiscard(draft.id)}>
-          Отклонить
-        </Btn>
+      >
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--muted)",
+            fontWeight: 600,
+            letterSpacing: 0.4,
+            textTransform: "uppercase",
+          }}
+        >
+          Ответ ИИ
+        </div>
+        {editing ? (
+          <textarea
+            value={buf}
+            onChange={(e) => setBuf(e.target.value)}
+            rows={4}
+            autoFocus
+            style={{
+              width: "100%",
+              resize: "vertical",
+              padding: 8,
+              borderRadius: 8,
+              border: "1px solid var(--line)",
+              background: "var(--surface)",
+              color: "var(--ink)",
+              fontSize: 14,
+              lineHeight: 1.45,
+              fontFamily: "inherit",
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              fontSize: 14,
+              lineHeight: 1.45,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              color: "var(--ink)",
+            }}
+          >
+            {text}
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {editing ? (
+          <>
+            <Btn
+              kind="primary"
+              size="sm"
+              onClick={() => {
+                setText(buf);
+                setEditing(false);
+              }}
+            >
+              Сохранить
+            </Btn>
+            <Btn
+              kind="ghost"
+              size="sm"
+              onClick={() => {
+                setBuf(text);
+                setEditing(false);
+              }}
+            >
+              Отмена
+            </Btn>
+          </>
+        ) : (
+          <>
+            <Btn kind="primary" size="sm" onClick={() => onSend(draft.id, text)}>
+              Отправить
+            </Btn>
+            <Btn
+              kind="ghost"
+              size="sm"
+              onClick={() => {
+                setBuf(text);
+                setEditing(true);
+              }}
+            >
+              Редактировать
+            </Btn>
+            <Btn kind="ghost" size="sm" onClick={() => onDiscard(draft.id)}>
+              Отклонить
+            </Btn>
+          </>
+        )}
+        <Link
+          href={`/chats?n=${encodeURIComponent(draft.negotiation_id)}`}
+          style={{ marginLeft: "auto" }}
+        >
+          <Btn kind="soft" size="sm">
+            Перейти к чату ↗
+          </Btn>
+        </Link>
       </div>
     </Card>
   );

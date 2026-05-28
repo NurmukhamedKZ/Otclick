@@ -8,6 +8,7 @@ export type Draft = {
   negotiation_id: string;
   draft_text: string;
   reason: string | null;
+  question_text: string | null;
   created_at: string;
 };
 

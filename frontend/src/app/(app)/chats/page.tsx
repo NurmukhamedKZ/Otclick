@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Topbar from "@/components/otclick/topbar";
 import { Btn, Card, Tag, Toggle, type TagTone } from "@/components/otclick/ui";
 import { IRefresh, ISearch } from "@/components/otclick/icons";
@@ -475,6 +476,8 @@ function MessagesPane({
 }
 
 export default function ChatsPage() {
+  const searchParams = useSearchParams();
+  const deepLinkId = searchParams.get("n");
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -492,12 +495,40 @@ export default function ChatsPage() {
   }, [chats, search]);
 
   useEffect(() => {
+    if (deepLinkId && chats) {
+      // honor ?n=… deep link from /todo. Falls back to first chat if id is
+      // not in the loaded page (chat older than 50 items — rare).
+      const hit = chats.find((c) => c.id === deepLinkId);
+      if (hit) {
+        setSelectedId(hit.id);
+        return;
+      }
+    }
     if (!selectedId && filtered && filtered.length > 0) {
       setSelectedId(filtered[0].id);
     }
-  }, [filtered, selectedId]);
+  }, [filtered, selectedId, deepLinkId, chats]);
 
-  const selected = chats?.find((c) => c.id === selectedId) ?? null;
+  const fromList =
+    chats?.find((c) => c.id === (deepLinkId ?? selectedId)) ?? null;
+  // Deep-link target may live past page 1 — render messages with a stub so the
+  // chat is reachable even when the summary row isn't in the current list.
+  const stubForDeepLink: ChatSummary | null =
+    deepLinkId && !fromList
+      ? {
+          id: deepLinkId,
+          vacancy_id: null,
+          vacancy_name: null,
+          employer_name: null,
+          employer_logo: null,
+          state_id: null,
+          state_name: null,
+          updated_at: null,
+          unread: 0,
+          has_updates: false,
+        }
+      : null;
+  const selected = fromList ?? stubForDeepLink;
 
   return (
     <div style={{ display: "grid", gap: 16 }}>

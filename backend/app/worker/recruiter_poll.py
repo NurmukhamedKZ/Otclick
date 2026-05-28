@@ -63,7 +63,10 @@ async def _process_chat(user_id: str, agent, client, item: dict) -> None:
         if target is None:
             return
         history = recruiter.to_lc_messages(items)
-        await agent.answer_recruiter(nid, str(target["id"]), history, client)
+        await agent.answer_recruiter(
+            nid, str(target["id"]), history, client,
+            question_text=(target.get("text") or "").strip() or None,
+        )
         await recruiter.upsert_cursor(
             user_id, nid, str(target["id"]), vacancy_id=vacancy_id, employer_name=employer_name
         )

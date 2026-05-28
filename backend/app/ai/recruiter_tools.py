@@ -25,6 +25,7 @@ class RecruiterContext:
     negotiation_id: str
     message_id: str
     client: ApiClient
+    question_text: str | None = None
 
 
 # --- side-effect helpers (testable without a ToolRuntime) --------------------
@@ -39,7 +40,10 @@ async def do_send(ctx: RecruiterContext, message: str) -> str:
 
 
 async def do_escalate(ctx: RecruiterContext, draft: str, reason: str) -> str:
-    await recruiter.insert_draft(ctx.user_id, ctx.negotiation_id, ctx.message_id, draft, reason)
+    await recruiter.insert_draft(
+        ctx.user_id, ctx.negotiation_id, ctx.message_id, draft, reason,
+        question_text=ctx.question_text,
+    )
     await notify(ctx.user_id, "recruiter_draft", {"negotiation_id": ctx.negotiation_id})
     return "escalated"
 
