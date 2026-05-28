@@ -12,6 +12,10 @@ import asyncio
 import logging
 import signal
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from app.services.plan import filter_accessible
 from app.services.worker_control import enabled_active_user_ids
 from app.worker.runner import get_registry
