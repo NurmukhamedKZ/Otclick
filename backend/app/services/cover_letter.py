@@ -15,6 +15,7 @@ import re
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.ai.prompts import COVER_LETTER_SYSTEM_PROMPT, sanitize_ai_text
 from app.config import settings
 from app.db.supabase import service_client
 
@@ -130,7 +131,7 @@ async def generate(
     )
     if cached:
         logger.debug("cover_letter: cache hit vacancy=%s", vacancy_id)
-        return cached
+        return sanitize_ai_text(cached)
 
     text: str | None = None
     source = "fallback"
@@ -140,13 +141,13 @@ async def generate(
         prompt = _build_prompt(vacancy, resume)
         try:
             resp = await llm.ainvoke([
-                SystemMessage(settings.COVER_LETTER_SYSTEM_PROMPT),
+                SystemMessage(COVER_LETTER_SYSTEM_PROMPT),
                 HumanMessage(prompt),
             ])
             content = resp.content
             if isinstance(content, list):  # some models return content parts
                 content = " ".join(str(c) for c in content)
-            text = (content or "").strip() or None
+            text = sanitize_ai_text(content) or None
             if text:
                 source = "ai"
                 model = settings.OPENAI_MODEL

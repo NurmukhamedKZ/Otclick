@@ -284,7 +284,7 @@ export default function RecruiterPage() {
   return (
     <>
       <Topbar
-        greeting="Переписка"
+        greeting="Задачи на подтверждение"
         subtitle={`${formDrafts.length} тестов · ${drafts.length} черновиков · ${todos.length} задач`}
       />
 

@@ -12,6 +12,11 @@ from typing import Literal
 import requests
 from langchain_core.language_models import BaseChatModel
 
+from app.ai.prompts import (
+    build_form_choice_prompt,
+    build_form_text_prompt,
+    sanitize_ai_text,
+)
 from app.config import settings
 from app.db.supabase import service_client
 from app.services.hh_auth import decrypt_token
@@ -180,15 +185,7 @@ def _choose_solution(
         options = "\n".join(
             f"{s['id']}: {_strip_tags(s.get('text'))}" for s in solutions
         )
-        prompt = (
-            "Ты отвечаешь на вопрос теста вакансии от имени кандидата, "
-            "правдиво и на основе его резюме.\n"
-            f"Резюме кандидата:\n{resume_ctx or '(нет данных)'}\n\n"
-            f"Вопрос: {question}\n"
-            f"Варианты:\n{options}\n"
-            "Выбери ID наиболее подходящего и правдивого для кандидата ответа. "
-            "Пришли только ID."
-        )
+        prompt = build_form_choice_prompt(question, options, resume_ctx)
         try:
             match = re.search(r"\d+", _ai_answer(chat, prompt))
             if match and any(str(s["id"]) == match.group(0) for s in solutions):
@@ -207,15 +204,8 @@ def _free_text(chat: BaseChatModel | None, question: str, resume_ctx: str = "") 
     """Answer a free-text task, grounded in the candidate's resume."""
     if chat is not None:
         try:
-            prompt = (
-                "Ты отвечаешь на вопрос теста вакансии от имени кандидата, "
-                "кратко и честно, на основе его резюме. Не выдумывай опыт, "
-                "которого нет в резюме.\n"
-                f"Резюме кандидата:\n{resume_ctx or '(нет данных)'}\n\n"
-                f"Вопрос: {question}\n"
-                "Дай краткий профессиональный ответ (2-4 предложения)."
-            )
-            return _ai_answer(chat, prompt)
+            prompt = build_form_text_prompt(question, resume_ctx)
+            return sanitize_ai_text(_ai_answer(chat, prompt))
         except Exception:
             logger.warning("fill: AI free-text failed — using fallback", exc_info=True)
     return "Да"

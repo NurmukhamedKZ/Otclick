@@ -36,12 +36,6 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-5.4-nano"
     OPENAI_RATE_LIMIT: int = 60
-    COVER_LETTER_SYSTEM_PROMPT: str = (
-        "Ты — кандидат на вакансию. Напиши сопроводительное письмо на русском, "
-        "3-5 предложений, без воды, без приветствия 'Уважаемые господа', "
-        "без эмодзи. Свяжи опыт из резюме с требованиями вакансии. "
-        "Заверши готовностью обсудить детали. Не выдумывай факты."
-    )
 
     @property
     def cors_origins_list(self) -> list[str]:

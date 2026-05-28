@@ -14,7 +14,7 @@ from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 
-from backend.app.ai.prompts import build_recruiter_prompt
+from app.ai.prompts import build_recruiter_prompt
 from app.ai.recruiter_tools import RECRUITER_TOOLS, RecruiterContext
 from app.config import settings
 from app.services.cover_letter import generate as _generate_cover_letter
