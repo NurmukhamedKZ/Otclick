@@ -18,10 +18,15 @@ logger = logging.getLogger(__name__)
 
 
 def new_employer_message(items: list[dict], last_handled_id: str | None) -> dict | None:
-    """Latest employer-authored message with text that appears AFTER last_handled_id.
+    """Latest employer-authored text message that the agent has not handled yet.
 
-    `items` are chronological (hh order). Returns None when the newest employer
-    message is not new (already handled) or there is no employer text message.
+    Cursor-based: only messages strictly after `last_handled_id` qualify.
+    `viewed_by_me` is intentionally NOT used as a trigger — that flag flips
+    only when the user opens the chat on hh.ru, so relying on it would make
+    the agent reply twice to the same employer message between polls.
+
+    Returns None when every employer text message is already at/behind the
+    cursor (nothing new since last reply).
     """
     start = 0
     if last_handled_id is not None:
@@ -31,8 +36,11 @@ def new_employer_message(items: list[dict], last_handled_id: str | None) -> dict
                 break
     latest = None
     for m in items[start:]:
-        if m.get("author", {}).get("participant_type") == "employer" and (m.get("text") or "").strip():
-            latest = m
+        if (m.get("author") or {}).get("participant_type") != "employer":
+            continue
+        if not (m.get("text") or "").strip():
+            continue
+        latest = m
     return latest
 
 

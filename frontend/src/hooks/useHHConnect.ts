@@ -7,6 +7,7 @@ export type JobStatus =
   | "idle"
   | "running"
   | "captcha_required"
+  | "code_required"
   | "success"
   | "failed";
 
@@ -81,6 +82,30 @@ export function useHHConnect() {
     [poll],
   );
 
+  const startEmailCode = useCallback(
+    async (email: string) => {
+      setError(null);
+      setSubmitting(true);
+      try {
+        const data = await apiFetch<ConnectResponse>("/api/hh/connect", {
+          method: "POST",
+          body: JSON.stringify({ username: email, login_method: "email_code" }),
+        });
+        setJobId(data.job_id);
+        setPhase(data.status);
+        poll(data.job_id);
+      } catch (e) {
+        setPhase("failed");
+        setError(
+          e instanceof ApiError ? e.message : "connect request failed",
+        );
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [poll],
+  );
+
   const submitCaptcha = useCallback(
     async (solution: string) => {
       if (!jobId) return;
@@ -96,6 +121,27 @@ export function useHHConnect() {
         poll(jobId);
       } catch (e) {
         setError(e instanceof Error ? e.message : "captcha submit failed");
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [jobId, poll],
+  );
+
+  const submitEmailCode = useCallback(
+    async (code: string) => {
+      if (!jobId) return;
+      setSubmitting(true);
+      setError(null);
+      try {
+        await apiFetch(`/api/hh/connect/${jobId}/code`, {
+          method: "POST",
+          body: JSON.stringify({ code }),
+        });
+        setPhase("running");
+        poll(jobId);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "code submit failed");
       } finally {
         setSubmitting(false);
       }
@@ -120,7 +166,9 @@ export function useHHConnect() {
     error,
     submitting,
     start,
+    startEmailCode,
     submitCaptcha,
+    submitEmailCode,
     reset,
   };
 }

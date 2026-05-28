@@ -25,7 +25,7 @@ def _client_with(negotiations, messages):
 @pytest.mark.asyncio
 async def test_poll_invokes_agent_and_advances_cursor():
     from app.worker import recruiter_poll as rp
-    negotiations = [{"id": "n9", "counters": {"unread_messages": 1},
+    negotiations = [{"id": "n9", "has_updates": True,
                      "vacancy": {"id": "v1", "employer": {"name": "Acme"}}}]
     messages = [{"id": "m5", "author": {"participant_type": "employer"}, "text": "Какая зарплата?"}]
     client = _client_with(negotiations, messages)
@@ -47,9 +47,29 @@ async def test_poll_invokes_agent_and_advances_cursor():
 
 
 @pytest.mark.asyncio
+async def test_poll_skips_chat_without_has_updates():
+    from app.worker import recruiter_poll as rp
+    # hh `counters.unread_messages` lies — only `has_updates` should gate work.
+    negotiations = [{"id": "n9", "counters": {"unread_messages": 5}, "vacancy": {}}]
+    client = _client_with(negotiations, [])
+    agent = MagicMock()
+    agent.answer_recruiter = AsyncMock()
+    with patch.object(rp, "load_api_client", new=AsyncMock(return_value=client)), \
+         patch.object(rp, "persist_if_refreshed", new=AsyncMock()), \
+         patch.object(rp.recruiter, "get_cursor", new=AsyncMock(return_value=None)), \
+         patch.object(rp.recruiter, "upsert_cursor", new=AsyncMock()), \
+         patch.object(rp.asyncio, "sleep", new=AsyncMock()):
+        await rp.poll_recruiter_chats("u1", agent)
+    agent.answer_recruiter.assert_not_awaited()
+    # also: messages endpoint must not be hit for non-updated chats
+    msg_calls = [c for c in client.get.call_args_list if "/messages" in c.args[0]]
+    assert msg_calls == []
+
+
+@pytest.mark.asyncio
 async def test_poll_skips_already_handled():
     from app.worker import recruiter_poll as rp
-    negotiations = [{"id": "n9", "counters": {"unread_messages": 1}, "vacancy": {}}]
+    negotiations = [{"id": "n9", "has_updates": True, "vacancy": {}}]
     messages = [{"id": "m5", "author": {"participant_type": "employer"}, "text": "hi"}]
     client = _client_with(negotiations, messages)
     agent = MagicMock()
@@ -66,7 +86,7 @@ async def test_poll_skips_already_handled():
 @pytest.mark.asyncio
 async def test_poll_swallows_send_error_keeps_cursor():
     from app.worker import recruiter_poll as rp
-    negotiations = [{"id": "n9", "counters": {"unread_messages": 1}, "vacancy": {}}]
+    negotiations = [{"id": "n9", "has_updates": True, "vacancy": {}}]
     messages = [{"id": "m5", "author": {"participant_type": "employer"}, "text": "hi"}]
     client = _client_with(negotiations, messages)
     agent = MagicMock()

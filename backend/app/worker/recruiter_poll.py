@@ -35,7 +35,11 @@ async def poll_recruiter_chats(user_id: str, agent) -> None:
             return
 
         for item in data.get("items", []):
-            if (item.get("counters") or {}).get("unread_messages", 0) <= 0:
+            # hh `counters.unread_messages` is unreliable (counts own activity).
+            # `has_updates` flips when employer touches the chat; the per-message
+            # `viewed_by_me` check inside _process_chat guards against false
+            # positives (e.g. employer-side status changes without text).
+            if not item.get("has_updates"):
                 continue
             await _process_chat(user_id, agent, client, item)
             await asyncio.sleep(throttle.next_delay(_rng))

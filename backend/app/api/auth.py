@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.api.deps import get_current_user
 from app.schemas.auth import (
     CaptchaSolveRequest,
+    EnterCodeRequest,
     HHConnectRequest,
     HHConnectResponse,
     HHRefreshResponse,
@@ -20,7 +21,20 @@ async def connect(
     body: HHConnectRequest,
     user_id: str = Depends(get_current_user),
 ):
-    job_id = await hh_auth.start_connect_job(user_id, body.username, body.password)
+    if body.login_method == "email_code":
+        if not body.username:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="username (email) is required",
+            )
+        job_id = await hh_auth.start_connect_email_code_job(user_id, body.username)
+    else:
+        if not body.password:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="password is required for password login method",
+            )
+        job_id = await hh_auth.start_connect_job(user_id, body.username, body.password)
     return HHConnectResponse(job_id=job_id, status="running")
 
 
@@ -52,6 +66,23 @@ async def submit_captcha(
     if state.status != "captcha_required":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="captcha not pending")
     await hh_auth.solve_captcha(job_id, body.solution)
+
+
+@router.post("/connect/{job_id}/code", status_code=status.HTTP_204_NO_CONTENT)
+async def submit_email_code(
+    job_id: str,
+    body: EnterCodeRequest,
+    user_id: str = Depends(get_current_user),
+):
+    state = hh_auth.get_job(job_id)
+    if not state or state.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
+    if state.status != "code_required":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="email code not expected (status is not code_required)",
+        )
+    await hh_auth.solve_email_code(job_id, body.code)
 
 
 @router.post("/disconnect", status_code=status.HTTP_204_NO_CONTENT)

@@ -20,7 +20,9 @@ export default function OnboardingPage() {
     error,
     submitting,
     start,
+    startEmailCode,
     submitCaptcha,
+    submitEmailCode,
     reset,
   } = useHHConnect();
 
@@ -29,6 +31,8 @@ export default function OnboardingPage() {
   const [statusErr, setStatusErr] = useState<string | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [loginMethod, setLoginMethod] = useState<"password" | "email_code">("password");
+  const [emailCode, setEmailCode] = useState("");
   const [solution, setSolution] = useState("");
 
   const loadStatus = async () => {
@@ -66,7 +70,13 @@ export default function OnboardingPage() {
   };
 
   const step =
-    phase === "running" ? 1 : phase === "captcha_required" ? 2 : phase === "success" ? 3 : 0;
+    phase === "running"
+      ? 1
+      : phase === "code_required" || phase === "captcha_required"
+        ? 2
+        : phase === "success"
+          ? 3
+          : 0;
 
   return (
     <div
@@ -150,58 +160,153 @@ export default function OnboardingPage() {
         )}
 
         {!statusLoading && !hhStatus?.connected && phase === "idle" && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              start(username, password);
-            }}
-          >
+          <>
             <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Подключи hh</div>
             <div style={{ color: "var(--muted)", fontSize: 14, marginBottom: 24 }}>
               Авторизуемся как ты, чтобы отправлять отклики. Пароль не сохраняется — используется один раз.
             </div>
-            <OnbInput
-              label="логин hh (email/телефон)"
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              autoComplete="username"
-            />
-            <OnbInput
-              label="пароль"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete="current-password"
-            />
+
             <div
               style={{
-                background: "var(--sage-soft)",
-                padding: "12px 14px",
-                borderRadius: 12,
-                fontSize: 12,
-                color: "var(--ink)",
-                marginBottom: 18,
                 display: "flex",
-                gap: 10,
-                alignItems: "center",
+                background: "var(--bg-deep)",
+                borderRadius: 14,
+                padding: 4,
+                marginBottom: 20,
               }}
             >
-              <IShield size={16} stroke="var(--ok)" />
-              <span>пароль шифруется AES-256 · отзываемый refresh token</span>
+              <button
+                type="button"
+                onClick={() => setLoginMethod("password")}
+                style={{
+                  flex: 1,
+                  padding: "10px 0",
+                  borderRadius: 11,
+                  border: "none",
+                  background: loginMethod === "password" ? "#fff" : "transparent",
+                  fontWeight: loginMethod === "password" ? 700 : 500,
+                  fontSize: 13,
+                  color: "var(--ink)",
+                  cursor: "pointer",
+                  boxShadow: loginMethod === "password" ? "0 1px 3px rgba(0,0,0,.08)" : "none",
+                  transition: "all .15s",
+                }}
+              >
+                пароль
+              </button>
+              <button
+                type="button"
+                onClick={() => setLoginMethod("email_code")}
+                style={{
+                  flex: 1,
+                  padding: "10px 0",
+                  borderRadius: 11,
+                  border: "none",
+                  background: loginMethod === "email_code" ? "#fff" : "transparent",
+                  fontWeight: loginMethod === "email_code" ? 700 : 500,
+                  fontSize: 13,
+                  color: "var(--ink)",
+                  cursor: "pointer",
+                  boxShadow: loginMethod === "email_code" ? "0 1px 3px rgba(0,0,0,.08)" : "none",
+                  transition: "all .15s",
+                }}
+              >
+                код из email
+              </button>
             </div>
-            <Btn
-              type="submit"
-              kind="primary"
-              size="lg"
-              disabled={submitting}
-              style={{ width: "100%", justifyContent: "center" }}
-            >
-              {submitting ? "Запуск…" : "подключить →"}
-            </Btn>
-          </form>
+
+            {loginMethod === "password" ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  start(username, password);
+                }}
+              >
+                <OnbInput
+                  label="логин hh (email/телефон)"
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                  autoComplete="username"
+                />
+                <OnbInput
+                  label="пароль"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  autoComplete="current-password"
+                />
+                <div
+                  style={{
+                    background: "var(--sage-soft)",
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    fontSize: 12,
+                    color: "var(--ink)",
+                    marginBottom: 18,
+                    display: "flex",
+                    gap: 10,
+                    alignItems: "center",
+                  }}
+                >
+                  <IShield size={16} stroke="var(--ok)" />
+                  <span>пароль шифруется AES-256 · отзываемый refresh token</span>
+                </div>
+                <Btn
+                  type="submit"
+                  kind="primary"
+                  size="lg"
+                  disabled={submitting}
+                  style={{ width: "100%", justifyContent: "center" }}
+                >
+                  {submitting ? "Запуск…" : "подключить →"}
+                </Btn>
+              </form>
+            ) : (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  startEmailCode(username);
+                }}
+              >
+                <OnbInput
+                  label="email"
+                  type="email"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                  autoComplete="email"
+                />
+                <div
+                  style={{
+                    background: "var(--sage-soft)",
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    fontSize: 12,
+                    color: "var(--ink)",
+                    marginBottom: 18,
+                    display: "flex",
+                    gap: 10,
+                    alignItems: "center",
+                  }}
+                >
+                  <IShield size={16} stroke="var(--ok)" />
+                  <span>пришлём письмо с кодом — введи его и готово</span>
+                </div>
+                <Btn
+                  type="submit"
+                  kind="primary"
+                  size="lg"
+                  disabled={submitting}
+                  style={{ width: "100%", justifyContent: "center" }}
+                >
+                  {submitting ? "Отправка…" : "дальше →"}
+                </Btn>
+              </form>
+            )}
+          </>
         )}
 
         {phase === "running" && (
@@ -288,6 +393,50 @@ export default function OnboardingPage() {
                 }}
               />
               <Btn type="submit" kind="primary" disabled={submitting || !solution}>
+                проверить
+              </Btn>
+            </form>
+          </>
+        )}
+
+        {phase === "code_required" && (
+          <>
+            <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>код из email</div>
+            <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 18 }}>
+              Мы отправили письмо с кодом на {username}. Введи 4 цифры ниже.
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitEmailCode(emailCode);
+                setEmailCode("");
+              }}
+              style={{ display: "flex", gap: 8 }}
+            >
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                value={emailCode}
+                onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ""))}
+                required
+                autoFocus
+                placeholder="••••"
+                style={{
+                  flex: 1,
+                  padding: "12px 16px",
+                  borderRadius: 12,
+                  border: "1.5px solid var(--line)",
+                  background: "#fff",
+                  outline: "none",
+                  fontFamily: "JetBrains Mono",
+                  fontSize: 24,
+                  letterSpacing: 8,
+                  color: "var(--ink)",
+                  textAlign: "center",
+                }}
+              />
+              <Btn type="submit" kind="primary" disabled={submitting || emailCode.length < 4}>
                 проверить
               </Btn>
             </form>
