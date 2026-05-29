@@ -72,3 +72,46 @@ def filter_relevant(llm, resume_summary: str, items: list[dict]) -> dict[str, Ve
         vid: ((False, irrelevant[vid]) if vid in irrelevant else (True, ""))
         for vid in ids
     }
+
+
+def get_cached_verdicts(resume_id: str, vacancy_ids: list[str]) -> dict[str, Verdict]:
+    """Read cached relevance verdicts for these vacancies. Empty on any failure."""
+    if not vacancy_ids:
+        return {}
+    try:
+        res = (
+            service_client.table("relevance_cache")
+            .select("vacancy_id,relevant,reason")
+            .eq("resume_id", resume_id)
+            .in_("vacancy_id", vacancy_ids)
+            .execute()
+        )
+    except Exception:
+        logger.warning("relevance: cache read failed — treating as miss", exc_info=True)
+        return {}
+    return {
+        r["vacancy_id"]: (bool(r["relevant"]), r.get("reason") or "")
+        for r in (res.data or [])
+    }
+
+
+def store_verdicts(user_id: str, resume_id: str, verdicts: dict[str, Verdict]) -> None:
+    """Persist verdicts to relevance_cache (idempotent upsert). Never raises."""
+    if not verdicts:
+        return
+    rows = [
+        {
+            "user_id": user_id,
+            "resume_id": resume_id,
+            "vacancy_id": vid,
+            "relevant": relevant,
+            "reason": reason or None,
+        }
+        for vid, (relevant, reason) in verdicts.items()
+    ]
+    try:
+        service_client.table("relevance_cache").upsert(
+            rows, on_conflict="resume_id,vacancy_id"
+        ).execute()
+    except Exception:
+        logger.warning("relevance: cache write failed", exc_info=True)

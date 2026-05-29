@@ -55,3 +55,46 @@ def test_no_llm_fails_open():
 def test_empty_items_returns_empty():
     from app.services.relevance import filter_relevant
     assert filter_relevant(_llm("{}"), "resume", []) == {}
+
+
+from types import SimpleNamespace
+from unittest.mock import patch
+
+
+def _cache_chain(final_data):
+    c = MagicMock()
+    for m in ("select", "eq", "in_", "upsert"):
+        getattr(c, m).return_value = c
+    c.execute.return_value = SimpleNamespace(data=final_data)
+    return c
+
+
+def test_get_cached_verdicts_maps_rows():
+    from app.services import relevance
+    rows = [
+        {"vacancy_id": "v1", "relevant": True, "reason": ""},
+        {"vacancy_id": "v2", "relevant": False, "reason": "sales"},
+    ]
+    chain = _cache_chain(rows)
+    with patch.object(relevance.service_client, "table", return_value=chain):
+        out = relevance.get_cached_verdicts("r1", ["v1", "v2"])
+    assert out["v1"] == (True, "")
+    assert out["v2"] == (False, "sales")
+
+
+def test_get_cached_verdicts_empty_ids():
+    from app.services import relevance
+    assert relevance.get_cached_verdicts("r1", []) == {}
+
+
+def test_store_verdicts_upserts_rows():
+    from app.services import relevance
+    chain = _cache_chain([])
+    with patch.object(relevance.service_client, "table", return_value=chain):
+        relevance.store_verdicts("u1", "r1", {"v2": (False, "sales")})
+    chain.upsert.assert_called_once()
+    rows = chain.upsert.call_args[0][0]
+    assert rows[0]["vacancy_id"] == "v2"
+    assert rows[0]["relevant"] is False
+    assert rows[0]["resume_id"] == "r1"
+    assert rows[0]["user_id"] == "u1"
