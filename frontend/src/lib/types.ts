@@ -144,6 +144,12 @@ export type BillingStatus = {
   history: PaymentEntry[];
 };
 
+export type CoverLetterResult = {
+  text: string;
+  cached: boolean;
+  remaining: number | null; // null = pro (unlimited); number = free remaining today
+};
+
 export type NotificationRow = {
   id: string;
   type: string;
