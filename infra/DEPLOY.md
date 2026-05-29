@@ -10,22 +10,6 @@ Three pieces deploy independently:
 
 ---
 
-**SSH access:**
-```bash
-ssh root@109.199.125.111
-```
-
-**Otclick path**
-```bash
-cd /home/app/app
-```
-
-**Docker rebuild**
-```bash
-docker compose -f infra/docker-compose.yml up -d --build
-```
----
-
 ## 1. Frontend → Vercel
 
 1. Push repo to GitHub.

@@ -20,7 +20,6 @@ type Item = { href?: string; id: string; icon: React.ReactNode; label: string; a
 const NAV: Item[] = [
   { id: "dashboard", href: "/dashboard", icon: <IHome />, label: "Главная" },
   { id: "applications", href: "/applications", icon: <IList />, label: "Отклики" },
-  { id: "cover-letter", href: "/cover-letter", icon: <IDoc />, label: "Письма" },
   { id: "chats", href: "/chats", icon: <IMail />, label: "Чаты" },
   { id: "todo", href: "/todo", icon: <IDoc />, label: "Todo" },
   { id: "notifications", href: "/notifications", icon: <IBell />, label: "Уведомления" },
