@@ -7,6 +7,7 @@ import logging
 import re
 
 from app.db.supabase import service_client
+from app.services import relevance
 from app.services.blacklist import bulk_auto_blacklist
 from app.services.filters_service import _filter_to_search_params
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
@@ -24,7 +25,7 @@ def _load_enabled_filters(user_id: str) -> list[dict]:
         service_client.table("filters")
         .select(
             "id,resume_id,text,area,salary_min,experience,schedule,"
-            "employment,professional_role,excluded_regex"
+            "employment,professional_role,excluded_regex,ai_filter_enabled"
         )
         .eq("user_id", user_id)
         .eq("enabled", True)
@@ -71,7 +72,33 @@ def _matches_excluded(item: dict, pat: re.Pattern | None) -> bool:
     return bool(pat.search(hay))
 
 
-async def produce_jobs(user_id: str) -> tuple[int, int]:
+async def _relevant_ids(
+    loop, agent, user_id: str, resume_id: str, candidates: list[dict]
+) -> set[str]:
+    """Return the subset of candidate vacancy ids that are relevant.
+
+    Cache-first: only uncached items hit the LLM. Fail-open: no agent → all
+    relevant. candidates carry {id, name, snippet_requirement, snippet_responsibility}.
+    """
+    ids = [c["id"] for c in candidates]
+    if agent is None or not ids:
+        return set(ids)
+    cached = await loop.run_in_executor(
+        None, relevance.get_cached_verdicts, resume_id, ids
+    )
+    uncached = [c for c in candidates if c["id"] not in cached]
+    fresh: dict[str, tuple[bool, str]] = {}
+    if uncached:
+        fresh = await agent.filter_relevant_vacancies(resume_id, uncached)
+        await loop.run_in_executor(
+            None, relevance.store_verdicts, user_id, resume_id, fresh
+        )
+    verdicts = {**cached, **fresh}
+    # Default missing verdicts to relevant (fail-open / conservative).
+    return {vid for vid in ids if verdicts.get(vid, (True, ""))[0]}
+
+
+async def produce_jobs(user_id: str, agent=None) -> tuple[int, int]:
     """Refill user queue from enabled filters.
 
     Returns (pushed, skipped_has_test_total) across all filters in this run.
@@ -168,9 +195,8 @@ async def produce_jobs(user_id: str) -> tuple[int, int]:
                     None, _blacklisted_employer_ids, user_id, employer_ids
                 )
 
+                page_candidates: list[dict] = []
                 for it in items:
-                    if pushed >= MAX_PUSH_PER_RUN:
-                        break
                     vid = str(it.get("id") or "")
                     if not vid or vid in already:
                         skipped_already += 1
@@ -195,11 +221,34 @@ async def produce_jobs(user_id: str) -> tuple[int, int]:
                     if _matches_excluded(it, excluded_pat):
                         skipped_excluded += 1
                         continue
+                    snippet = it.get("snippet") or {}
+                    page_candidates.append({
+                        "id": vid,
+                        "name": it.get("name") or "",
+                        "snippet_requirement": snippet.get("requirement") or "",
+                        "snippet_responsibility": snippet.get("responsibility") or "",
+                    })
+
+                if f.get("ai_filter_enabled") and page_candidates:
+                    keep = await _relevant_ids(
+                        loop, agent, user_id, f["resume_id"], page_candidates
+                    )
+                    dropped = len(page_candidates) - len(keep)
+                    if dropped:
+                        logger.info(
+                            "producer: user=%s filter=%s relevance dropped %d/%d",
+                            user_id, f.get("id"), dropped, len(page_candidates),
+                        )
+                    page_candidates = [c for c in page_candidates if c["id"] in keep]
+
+                for c in page_candidates:
+                    if pushed >= MAX_PUSH_PER_RUN:
+                        break
                     await queue.put(
                         ApplyJob(
                             user_id=user_id,
                             resume_id=f["resume_id"],
-                            vacancy_id=vid,
+                            vacancy_id=c["id"],
                             filter_id=f.get("id"),
                         )
                     )
