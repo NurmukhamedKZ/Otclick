@@ -6,9 +6,9 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
 import { Btn, Card, Field, Tag } from "@/components/otclick/ui";
-import { ICheck, ILink, IPower, IRefresh, ITelegram } from "@/components/otclick/icons";
+import { ILink, IPower, IRefresh, ITelegram } from "@/components/otclick/icons";
 
-type Tab = "profile" | "plan" | "integrations" | "danger";
+type Tab = "profile" | "integrations" | "danger";
 
 type HHStatus = {
   connected: boolean;
@@ -26,42 +26,8 @@ type BillingStatusShape = {
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "profile", label: "Профиль" },
-  { key: "plan", label: "Тариф" },
   { key: "integrations", label: "Интеграции" },
   { key: "danger", label: "Опасная зона" },
-];
-
-const PLANS = [
-  {
-    id: "free",
-    name: "Free",
-    price: "0 ₽",
-    sub: "/ навсегда",
-    perks: ["50 откликов / день", "1 фильтр", "без приоритета"],
-    tone: "cream" as const,
-  },
-  {
-    id: "pro",
-    name: "Pro",
-    price: "999 ₽",
-    sub: "/ месяц",
-    perks: [
-      "150 откликов / день",
-      "∞ фильтров",
-      "AI-сопроводительные",
-      "антибан + капча",
-      "realtime",
-    ],
-    tone: "dark" as const,
-  },
-  {
-    id: "team",
-    name: "Team",
-    price: "скоро",
-    sub: "",
-    perks: ["5 аккаунтов", "shared фильтры", "аналитика", "API доступ"],
-    tone: "light" as const,
-  },
 ];
 
 export default function AccountPage() {
@@ -230,79 +196,6 @@ export default function AccountPage() {
               <li>ошибки worker&apos;а</li>
             </ul>
           </Card>
-        </div>
-      )}
-
-      {tab === "plan" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 18 }}>
-          {PLANS.map((p) => (
-            <Card key={p.id} tone={p.tone} style={{ position: "relative" }}>
-              {p.id === "pro" && isPro && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: 14,
-                    right: 14,
-                    background: "var(--yellow)",
-                    color: "var(--ink)",
-                    padding: "3px 9px",
-                    borderRadius: 999,
-                    fontSize: 10,
-                    fontWeight: 700,
-                  }}
-                >
-                  текущий
-                </div>
-              )}
-              <div style={{ fontSize: 16, fontWeight: 700 }}>{p.name}</div>
-              <div style={{ marginTop: 14, marginBottom: 18 }}>
-                <span style={{ fontSize: 32, fontWeight: 800 }}>{p.price}</span>
-                <span
-                  style={{
-                    fontSize: 13,
-                    color: p.tone === "dark" ? "#ffffff60" : "var(--muted)",
-                    marginLeft: 4,
-                  }}
-                >
-                  {p.sub}
-                </span>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {p.perks.map((perk) => (
-                  <div
-                    key={perk}
-                    style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}
-                  >
-                    <ICheck size={14} stroke={p.tone === "dark" ? "var(--yellow)" : "var(--ok)"} />
-                    {perk}
-                  </div>
-                ))}
-              </div>
-              <div style={{ marginTop: 22 }}>
-                {p.id === "pro" && isPro ? (
-                  <Link href="/billing">
-                    <Btn kind="yellow" size="sm">
-                      управлять подпиской
-                    </Btn>
-                  </Link>
-                ) : p.id === "pro" ? (
-                  <Link href="/billing">
-                    <Btn kind="yellow" size="sm">
-                      оформить
-                    </Btn>
-                  </Link>
-                ) : p.id === "team" ? (
-                  <Btn kind="primary" size="sm" disabled>
-                    скоро
-                  </Btn>
-                ) : (
-                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
-                    бесплатный план активен
-                  </span>
-                )}
-              </div>
-            </Card>
-          ))}
         </div>
       )}
 

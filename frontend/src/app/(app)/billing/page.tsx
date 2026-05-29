@@ -52,20 +52,60 @@ function fmtDate(s: string | null): string {
   return s ? new Date(s).toLocaleDateString("ru-RU") : "—";
 }
 
-const PERKS = [
-  "150 откликов / день",
-  "∞ фильтров",
-  "AI-сопроводительные",
-  "антибан + обход капчи",
-  "realtime уведомления",
-  "приоритетная поддержка",
+type Plan = {
+  id: string;
+  name: string;
+  price: string;
+  period: string;
+  sub: string;
+  popular?: boolean;
+  feats: string[];
+};
+
+// Mirrors the landing pricing (app/page.tsx PLANS). Free tier is the no-card
+// onboarding magnet, not a billable plan — surfaced here only as current status.
+const PLANS: Plan[] = [
+  {
+    id: "sprint",
+    name: "Спринт",
+    price: "1 990 ₽",
+    period: "7 дней",
+    sub: "Закрыть поиск за один спринт. Низкий коммит.",
+    feats: [
+      "До 25 откликов в день",
+      "AI-сопроводительные под каждую вакансию",
+      "Агент отвечает рекрутёрам и ведёт до оффера",
+      "Формы, тесты, созвоны — в задачах",
+    ],
+  },
+  {
+    id: "month",
+    name: "Месяц",
+    price: "3 900 ₽",
+    period: "в месяц",
+    sub: "Полный автопилот. Агент-ответчик уже включён.",
+    popular: true,
+    feats: [
+      "До 30 откликов в день",
+      "Всё из «Спринта»",
+      "Приоритетная обработка чатов",
+      "Авто-продление · отмена в 1 клик",
+    ],
+  },
 ];
+
+const PLAN_LABELS: Record<string, string> = {
+  trial: "Пробный период",
+  free: "Бесплатный",
+  active: "Активная подписка",
+  cancelled: "Отменена · доступ до конца периода",
+};
 
 export default function BillingPage() {
   const supabase = createClient();
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const [email, setEmail] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -80,10 +120,13 @@ export default function BillingPage() {
     loadStatus();
   }, [supabase, loadStatus]);
 
-  async function subscribe() {
-    setBusy(true);
+  async function subscribe(planId: string) {
+    setBusy(planId);
     try {
-      const p = await apiFetch<SubscribeParams>("/api/billing/subscribe", { method: "POST" });
+      const p = await apiFetch<SubscribeParams>(
+        `/api/billing/subscribe?plan=${planId}`,
+        { method: "POST" },
+      );
       await loadWidgetScript();
       if (!window.cp) throw new Error("CloudPayments widget unavailable");
       const widget = new window.cp.CloudPayments();
@@ -110,12 +153,12 @@ export default function BillingPage() {
             setTimeout(loadStatus, 10000);
           },
           onFail: (reason) => pushToast({ kind: "error", title: `платёж не прошёл: ${reason}` }),
-          onComplete: () => setBusy(false),
+          onComplete: () => setBusy(null),
         },
       );
     } catch (e) {
       pushToast({ kind: "error", title: e instanceof Error ? e.message : "subscribe failed" });
-      setBusy(false);
+      setBusy(null);
     }
   }
 
@@ -151,67 +194,58 @@ export default function BillingPage() {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 18, marginBottom: 18 }}>
-        <Card tone="dark">
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: 18,
-            }}
-          >
-            <div>
-              <div className="serif" style={{ fontSize: 14, color: "var(--yellow)" }}>
-                otclick pro
-              </div>
-              <div style={{ fontSize: 32, fontWeight: 800, marginTop: 4 }}>999 ₽ / мес</div>
+      <Card style={{ marginBottom: 18 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 14,
+            flexWrap: "wrap",
+            gap: 12,
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 12, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              текущий статус
             </div>
-            <Tag tone={isActive ? "ok" : "neutral"} dot>
-              {isActive ? "активна" : "не активна"}
-            </Tag>
+            <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2 }}>{PLAN_LABELS[plan] ?? plan}</div>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {PERKS.map((p) => (
-              <div
-                key={p}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  fontSize: 13,
-                  color: "#F5F1E6",
-                }}
-              >
-                <ICheck size={14} stroke="var(--yellow)" />
-                {p}
-              </div>
-            ))}
+          <Tag tone={status?.has_access ? "ok" : "neutral"} dot>
+            {status?.has_access ? "доступ активен" : "нет доступа"}
+          </Tag>
+        </div>
+        {status?.trial_ends && <Row k="trial до" v={fmtDate(status.trial_ends)} />}
+        {status?.plan_expires_at && <Row k="действует до" v={fmtDate(status.plan_expires_at)} />}
+        {status?.next_charge_at && <Row k="следующее списание" v={fmtDate(status.next_charge_at)} />}
+        {isActive && (
+          <div style={{ marginTop: 16 }}>
+            <Btn kind="coral" size="sm" onClick={cancel}>
+              отменить подписку
+            </Btn>
           </div>
-          <div style={{ marginTop: 22, display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {isActive ? (
-              <Btn kind="coral" size="md" onClick={cancel}>
-                отменить подписку
-              </Btn>
-            ) : (
-              <Btn kind="yellow" size="md" icon={<IBolt size={14} />} onClick={subscribe} disabled={busy}>
-                {busy ? "открываем…" : "оформить"}
-              </Btn>
-            )}
-          </div>
-        </Card>
+        )}
+      </Card>
 
-        <Card>
-          <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 14 }}>Статус</div>
-          <Row k="план" v={plan} />
-          {status?.trial_ends && <Row k="trial до" v={fmtDate(status.trial_ends)} />}
-          {status?.plan_expires_at && (
-            <Row k="действует до" v={fmtDate(status.plan_expires_at)} />
-          )}
-          {status?.next_charge_at && (
-            <Row k="следующее списание" v={fmtDate(status.next_charge_at)} />
-          )}
-        </Card>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, 1fr)",
+          gap: 18,
+          marginBottom: 18,
+          alignItems: "stretch",
+        }}
+      >
+        {PLANS.map((p) => (
+          <PlanCard
+            key={p.id}
+            plan={p}
+            busy={busy === p.id}
+            disabled={busy !== null}
+            cta={isActive ? "сменить план" : "оформить"}
+            onSubscribe={() => subscribe(p.id)}
+          />
+        ))}
       </div>
 
       <Card>
@@ -260,6 +294,92 @@ export default function BillingPage() {
         )}
       </Card>
     </>
+  );
+}
+
+function PlanCard({
+  plan,
+  busy,
+  disabled,
+  cta,
+  onSubscribe,
+}: {
+  plan: Plan;
+  busy: boolean;
+  disabled: boolean;
+  cta: string;
+  onSubscribe: () => void;
+}) {
+  const dark = !!plan.popular;
+  return (
+    <Card
+      tone={dark ? "dark" : "light"}
+      style={{
+        padding: 28,
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        border: dark ? "none" : "1px solid var(--line-2)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: dark ? "#F5F1E6" : "var(--ink)" }}>
+          {plan.name}
+        </span>
+        {plan.popular && <Tag tone="yellow">★ популярный</Tag>}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <span
+          style={{
+            fontSize: 34,
+            fontWeight: 800,
+            letterSpacing: -1,
+            color: dark ? "#F5F1E6" : "var(--ink)",
+          }}
+        >
+          {plan.price}
+        </span>
+        <span style={{ fontSize: 14, color: dark ? "#ffffff80" : "var(--muted)" }}>
+          {plan.period}
+        </span>
+      </div>
+
+      <p
+        style={{
+          fontSize: 13,
+          lineHeight: 1.5,
+          margin: "10px 0 20px",
+          color: dark ? "#ffffff99" : "var(--muted)",
+        }}
+      >
+        {plan.sub}
+      </p>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
+        {plan.feats.map((f) => (
+          <div key={f} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <ICheck size={14} stroke={dark ? "var(--yellow)" : "var(--ok)"} />
+            <span style={{ fontSize: 13, lineHeight: 1.4, color: dark ? "#F5F1E6" : "var(--ink)" }}>
+              {f}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 22 }}>
+        <Btn
+          kind={dark ? "yellow" : "primary"}
+          size="md"
+          icon={<IBolt size={14} />}
+          onClick={onSubscribe}
+          disabled={disabled}
+          style={{ width: "100%", justifyContent: "center" }}
+        >
+          {busy ? "открываем…" : cta}
+        </Btn>
+      </div>
+    </Card>
   );
 }
 
