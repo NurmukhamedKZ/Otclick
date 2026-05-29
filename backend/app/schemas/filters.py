@@ -17,6 +17,7 @@ class FilterCreate(BaseModel):
     professional_role: list[int] | None = None
     excluded_regex: str | None = None
     enabled: bool = True
+    ai_filter_enabled: bool = True
 
 
 class FilterUpdate(BaseModel):
@@ -30,6 +31,7 @@ class FilterUpdate(BaseModel):
     professional_role: list[int] | None = None
     excluded_regex: str | None = None
     enabled: bool | None = None
+    ai_filter_enabled: bool | None = None
 
     @model_validator(mode="after")
     def _at_least_one(self):
@@ -50,6 +52,7 @@ class FilterResponse(BaseModel):
     professional_role: list[int] | None = None
     excluded_regex: str | None = None
     enabled: bool = True
+    ai_filter_enabled: bool = True
     created_at: datetime | None = None
 
 
