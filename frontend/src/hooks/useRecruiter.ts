@@ -47,32 +47,23 @@ export function useRecruiter() {
     refresh();
   }, [refresh]);
 
-  const sendDraft = useCallback(
-    async (id: string, message: string) => {
-      await apiFetch(`/api/recruiter/drafts/${id}/send`, {
-        method: "POST",
-        body: JSON.stringify({ message }),
-      });
-      await refresh();
-    },
-    [refresh],
-  );
+  const sendDraft = useCallback(async (id: string, message: string) => {
+    await apiFetch(`/api/recruiter/drafts/${id}/send`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    });
+    setDrafts((prev) => prev.filter((d) => d.id !== id));
+  }, []);
 
-  const discardDraft = useCallback(
-    async (id: string) => {
-      await apiFetch(`/api/recruiter/drafts/${id}/discard`, { method: "POST" });
-      await refresh();
-    },
-    [refresh],
-  );
+  const discardDraft = useCallback(async (id: string) => {
+    await apiFetch(`/api/recruiter/drafts/${id}/discard`, { method: "POST" });
+    setDrafts((prev) => prev.filter((d) => d.id !== id));
+  }, []);
 
-  const resolveTodo = useCallback(
-    async (id: string, action: "done" | "dismiss") => {
-      await apiFetch(`/api/recruiter/todos/${id}/${action}`, { method: "POST" });
-      await refresh();
-    },
-    [refresh],
-  );
+  const resolveTodo = useCallback(async (id: string, action: "done" | "dismiss") => {
+    await apiFetch(`/api/recruiter/todos/${id}/${action}`, { method: "POST" });
+    setTodos((prev) => prev.filter((t) => t.id !== id));
+  }, []);
 
   return { drafts, todos, loading, error, refresh, sendDraft, discardDraft, resolveTodo };
 }

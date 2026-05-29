@@ -22,12 +22,14 @@ function FormDraftCard({
     setAnswers((prev) => prev.map((a, i) => (i === idx ? { ...a, ...patch } : a)));
 
   return (
-    <Card style={{ display: "grid", gap: 10 }}>
-      <div style={{ fontWeight: 600 }}>
+    <Card style={{ display: "grid", gap: 10, gridTemplateColumns: "minmax(0, 1fr)" }}>
+      <div style={{ fontWeight: 600, overflowWrap: "anywhere" }}>
         {draft.vacancy_title ?? `Вакансия ${draft.vacancy_id}`}
       </div>
       {draft.employer_name && (
-        <div style={{ fontSize: 13, color: "var(--muted)" }}>{draft.employer_name}</div>
+        <div style={{ fontSize: 13, color: "var(--muted)", overflowWrap: "anywhere" }}>
+          {draft.employer_name}
+        </div>
       )}
       {draft.vacancy_url && (
         <a
@@ -41,8 +43,8 @@ function FormDraftCard({
       )}
       <div style={{ display: "grid", gap: 12, paddingTop: 6 }}>
         {answers.map((a, i) => (
-          <div key={a.task_id} style={{ display: "grid", gap: 6 }}>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>{a.question}</div>
+          <div key={a.task_id} style={{ display: "grid", gap: 6, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, overflowWrap: "anywhere" }}>{a.question}</div>
             {a.type === "choice" && a.options ? (
               <select
                 value={a.answer_id ?? ""}
@@ -52,6 +54,8 @@ function FormDraftCard({
                   update(i, { answer_id: id, answer: text });
                 }}
                 style={{
+                  width: "100%",
+                  minWidth: 0,
                   padding: 8,
                   borderRadius: 10,
                   border: "1px solid var(--line)",
@@ -128,7 +132,7 @@ function DraftCard({
   const [editing, setEditing] = useState(false);
   const [buf, setBuf] = useState(draft.draft_text);
   return (
-    <Card style={{ display: "grid", gap: 10 }}>
+    <Card style={{ display: "grid", gap: 10, gridTemplateColumns: "minmax(0, 1fr)" }}>
       {draft.question_text && (
         <div
           style={{
@@ -287,8 +291,8 @@ export default function RecruiterPage() {
       {loading || formLoading ? (
         <div style={{ padding: 16, color: "var(--muted)" }}>Загрузка…</div>
       ) : (
-        <div style={{ display: "grid", gap: 28, padding: 16 }}>
-          <section style={{ display: "grid", gap: 12 }}>
+        <div style={{ display: "grid", gap: 28, padding: 16, gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <section style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
             <h2 style={{ fontSize: 16, fontWeight: 700 }}>
               Тесты вакансий на аппрув ({formDrafts.length})
             </h2>
@@ -307,7 +311,7 @@ export default function RecruiterPage() {
             ))}
           </section>
 
-          <section style={{ display: "grid", gap: 12 }}>
+          <section style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
             <h2 style={{ fontSize: 16, fontWeight: 700 }}>Черновики ответов ({drafts.length})</h2>
             {drafts.length === 0 && (
               <div style={{ fontSize: 14, color: "var(--muted)" }}>Нет черновиков.</div>
@@ -317,21 +321,27 @@ export default function RecruiterPage() {
             ))}
           </section>
 
-          <section style={{ display: "grid", gap: 12 }}>
+          <section style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
             <h2 style={{ fontSize: 16, fontWeight: 700 }}>Задачи ({todos.length})</h2>
             {todos.length === 0 && (
               <div style={{ fontSize: 14, color: "var(--muted)" }}>Нет задач.</div>
             )}
             {todos.map((t) => (
-              <Card key={t.id} style={{ display: "grid", gap: 6 }}>
-                <div style={{ fontWeight: 600 }}>{t.title}</div>
-                {t.detail && <div style={{ fontSize: 14 }}>{t.detail}</div>}
+              <Card key={t.id} style={{ display: "grid", gap: 6, gridTemplateColumns: "minmax(0, 1fr)" }}>
+                <div style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{t.title}</div>
+                {t.detail && <div style={{ fontSize: 14, overflowWrap: "anywhere" }}>{t.detail}</div>}
                 {t.link && (
                   <a
                     href={t.link}
                     target="_blank"
                     rel="noreferrer"
-                    style={{ fontSize: 14, color: "var(--coral)", textDecoration: "underline" }}
+                    style={{
+                      fontSize: 14,
+                      color: "var(--coral)",
+                      textDecoration: "underline",
+                      wordBreak: "break-all",
+                      overflowWrap: "anywhere",
+                    }}
                   >
                     {t.link}
                   </a>

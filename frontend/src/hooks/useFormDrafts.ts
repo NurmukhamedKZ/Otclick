@@ -52,18 +52,15 @@ export function useFormDrafts() {
         method: "POST",
         body: JSON.stringify({ answers, letter }),
       });
-      await refresh();
+      setDrafts((prev) => prev.filter((d) => d.id !== id));
     },
-    [refresh],
+    [],
   );
 
-  const discard = useCallback(
-    async (id: string) => {
-      await apiFetch(`/api/forms/drafts/${id}/discard`, { method: "POST" });
-      await refresh();
-    },
-    [refresh],
-  );
+  const discard = useCallback(async (id: string) => {
+    await apiFetch(`/api/forms/drafts/${id}/discard`, { method: "POST" });
+    setDrafts((prev) => prev.filter((d) => d.id !== id));
+  }, []);
 
   return { drafts, loading, error, refresh, approve, discard };
 }
