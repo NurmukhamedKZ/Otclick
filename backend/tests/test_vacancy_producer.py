@@ -61,3 +61,121 @@ async def test_has_test_vacancy_is_queued_not_skipped():
     assert queue.qsize() == 1
     job = queue.get_nowait()
     assert job.vacancy_id == "v1"
+
+
+def _filter_row(**over):
+    base = {
+        "id": "f1", "resume_id": "r1", "text": "AI engineer", "area": None,
+        "salary_min": None, "experience": None, "schedule": None,
+        "employment": None, "professional_role": None, "excluded_regex": None,
+        "ai_filter_enabled": True,
+    }
+    base.update(over)
+    return base
+
+
+@pytest.mark.asyncio
+async def test_relevance_drops_irrelevant():
+    from app.services import vacancy_producer as vp
+    from app.worker.queue import drop_user_queue, get_user_queue
+    drop_user_queue("u1")
+
+    filters_chain = _chain([_filter_row()])
+    apps_chain = _chain([])
+    blacklist_chain = _chain([])
+
+    def _table(name):
+        return {"filters": filters_chain, "applications": apps_chain,
+                "blacklist": blacklist_chain}[name]
+
+    client = MagicMock()
+    client.access_token = "tok"
+    client.get.return_value = {
+        "items": [
+            {"id": "v1", "name": "AI Engineer", "employer": {"id": "e1"}},
+            {"id": "v2", "name": "Sales Manager", "employer": {"id": "e2"}},
+        ],
+        "found": 2,
+    }
+
+    agent = MagicMock()
+    agent.filter_relevant_vacancies = AsyncMock(
+        return_value={"v1": (True, ""), "v2": (False, "sales")}
+    )
+
+    with patch.object(vp.service_client, "table", side_effect=_table), \
+         patch.object(vp.relevance, "get_cached_verdicts", return_value={}), \
+         patch.object(vp.relevance, "store_verdicts"), \
+         patch.object(vp, "load_api_client", new=AsyncMock(return_value=client)), \
+         patch.object(vp, "persist_if_refreshed", new=AsyncMock()):
+        pushed, _ = await vp.produce_jobs("u1", agent)
+
+    assert pushed == 1
+    queue = get_user_queue("u1")
+    assert queue.qsize() == 1
+    assert queue.get_nowait().vacancy_id == "v1"
+
+
+@pytest.mark.asyncio
+async def test_relevance_uses_cache_no_llm_call():
+    from app.services import vacancy_producer as vp
+    from app.worker.queue import drop_user_queue, get_user_queue
+    drop_user_queue("u1")
+
+    def _table(name):
+        return {"filters": _chain([_filter_row()]), "applications": _chain([]),
+                "blacklist": _chain([])}[name]
+
+    client = MagicMock()
+    client.access_token = "tok"
+    client.get.return_value = {
+        "items": [{"id": "v2", "name": "Sales Manager", "employer": {"id": "e2"}}],
+        "found": 1,
+    }
+
+    agent = MagicMock()
+    agent.filter_relevant_vacancies = AsyncMock(return_value={})
+
+    with patch.object(vp.service_client, "table", side_effect=_table), \
+         patch.object(vp.relevance, "get_cached_verdicts",
+                      return_value={"v2": (False, "cached sales")}), \
+         patch.object(vp.relevance, "store_verdicts"), \
+         patch.object(vp, "load_api_client", new=AsyncMock(return_value=client)), \
+         patch.object(vp, "persist_if_refreshed", new=AsyncMock()):
+        pushed, _ = await vp.produce_jobs("u1", agent)
+
+    assert pushed == 0
+    agent.filter_relevant_vacancies.assert_not_awaited()  # fully served from cache
+    assert get_user_queue("u1").qsize() == 0
+
+
+@pytest.mark.asyncio
+async def test_ai_filter_disabled_bypasses_relevance():
+    from app.services import vacancy_producer as vp
+    from app.worker.queue import drop_user_queue, get_user_queue
+    drop_user_queue("u1")
+
+    def _table(name):
+        return {"filters": _chain([_filter_row(ai_filter_enabled=False)]),
+                "applications": _chain([]), "blacklist": _chain([])}[name]
+
+    client = MagicMock()
+    client.access_token = "tok"
+    client.get.return_value = {
+        "items": [{"id": "v2", "name": "Sales Manager", "employer": {"id": "e2"}}],
+        "found": 1,
+    }
+
+    agent = MagicMock()
+    agent.filter_relevant_vacancies = AsyncMock(return_value={})
+
+    with patch.object(vp.service_client, "table", side_effect=_table), \
+         patch.object(vp.relevance, "get_cached_verdicts", return_value={}), \
+         patch.object(vp.relevance, "store_verdicts"), \
+         patch.object(vp, "load_api_client", new=AsyncMock(return_value=client)), \
+         patch.object(vp, "persist_if_refreshed", new=AsyncMock()):
+        pushed, _ = await vp.produce_jobs("u1", agent)
+
+    assert pushed == 1  # not filtered
+    agent.filter_relevant_vacancies.assert_not_awaited()
+    assert get_user_queue("u1").qsize() == 1

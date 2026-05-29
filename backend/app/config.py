@@ -25,12 +25,7 @@ class Settings(BaseSettings):
     # HMAC key for webhook verification (Content-HMAC header) — never exposed.
     CLOUDPAYMENTS_PUBLIC_ID: str = ""
     CLOUDPAYMENTS_API_SECRET: str = ""
-    PLAN_PRICE: int = 999
     PLAN_CURRENCY: str = "RUB"
-    PLAN_NAME: str = "AI Autoclicker Pro"
-    # Widget recurrent flag: charge every PLAN_PERIOD PLAN_INTERVAL(s).
-    PLAN_INTERVAL: str = "Month"
-    PLAN_PERIOD: int = 1
 
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
@@ -47,3 +42,27 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+# Paid plans offered in-app (mirror the landing pricing). Widget recurrent flag:
+# charge every `period` `interval`(s). `period_days` drives the access window — the
+# webhook derives it from the charged Amount (see billing._plan_for_amount).
+PLANS: dict[str, dict] = {
+    "sprint": {
+        "id": "sprint",
+        "name": "Otclick Спринт",
+        "price": 1990,
+        "interval": "Week",
+        "period": 1,
+        "period_days": 7,
+    },
+    "month": {
+        "id": "month",
+        "name": "Otclick Месяц",
+        "price": 3900,
+        "interval": "Month",
+        "period": 1,
+        "period_days": 30,
+    },
+}
+DEFAULT_PLAN_ID = "month"

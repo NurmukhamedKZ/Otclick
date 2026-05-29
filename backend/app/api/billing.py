@@ -8,10 +8,10 @@ router = APIRouter(prefix="/api/billing", tags=["billing"])
 
 
 @router.post("/subscribe", response_model=SubscribeResponse)
-async def subscribe(user_id: str = Depends(get_current_user)):
-    """Return CloudPayments widget params (recurrent). No charge happens here —
-    the widget tokenizes the card and CP notifies us via the webhook."""
-    return billing_service.subscribe_params(user_id)
+async def subscribe(plan: str | None = None, user_id: str = Depends(get_current_user)):
+    """Return CloudPayments widget params (recurrent) for the chosen plan. No charge
+    happens here — the widget tokenizes the card and CP notifies us via the webhook."""
+    return billing_service.subscribe_params(user_id, plan)
 
 
 @router.post("/cancel")

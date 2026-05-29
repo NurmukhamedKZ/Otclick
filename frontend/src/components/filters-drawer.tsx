@@ -666,6 +666,28 @@ function FilterEditor({
           style={inputStyle}
         />
       </EditorField>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginTop: 4,
+          paddingTop: 14,
+          borderTop: "1px solid var(--line)",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>AI-фильтр релевантности</div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+            Бот пропустит вакансии, которые ИИ счёл нерелевантными резюме
+          </div>
+        </div>
+        <Toggle
+          on={filter.ai_filter_enabled}
+          onChange={(next) => commit({ ai_filter_enabled: next })}
+        />
+      </div>
     </Card>
   );
 }

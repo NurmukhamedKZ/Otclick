@@ -19,6 +19,7 @@ from app.ai.recruiter_tools import RECRUITER_TOOLS, RecruiterContext
 from app.config import settings
 from app.services.cover_letter import generate as _generate_cover_letter
 from app.services.form_filler import FillStatus, prepare_form_answers
+from app.services.relevance import Verdict, filter_relevant
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class HHAgent:
         self._recruiter_agent = None
         self._resume_summary: str | None = None
         self._full_resumes: dict[str, dict] = {}
+        self._relevance_summaries: dict[str, str] = {}
 
     async def write_form_answers(
         self, user_id: str, resume_id: str, vacancy: dict
@@ -67,6 +69,33 @@ class HHAgent:
             resume=full or resume,
             resume_uuid=resume_uuid,
         )
+
+    async def filter_relevant_vacancies(
+        self, resume_id: str, items: list[dict]
+    ) -> dict[str, Verdict]:
+        """Per-vacancy relevance verdicts grounded in the filter's resume.
+
+        items: {id, name, snippet_requirement, snippet_responsibility}.
+        Fail-open: no llm → all relevant (handled inside filter_relevant)."""
+        summary = await self._summary_for(resume_id)
+        return filter_relevant(self.llm, summary, items)
+
+    async def _summary_for(self, resume_id: str) -> str:
+        """Resume summary for a specific resume_id, cached. '' on failure."""
+        if resume_id in self._relevance_summaries:
+            return self._relevance_summaries[resume_id]
+        from app.services.form_filler import _resume_summary, load_resume
+        try:
+            resume = await load_resume(self.user_id, resume_id)
+            summary = _resume_summary(resume)
+        except Exception:
+            logger.warning(
+                "relevance: resume load failed for %s/%s — ungrounded",
+                self.user_id, resume_id, exc_info=True,
+            )
+            summary = ""
+        self._relevance_summaries[resume_id] = summary
+        return summary
 
     async def _load_full_resume(self, resume_uuid: str) -> dict | None:
         """Full hh resume payload, cached per resume_uuid (same as the

@@ -19,7 +19,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from app.config import settings
+from app.config import DEFAULT_PLAN_ID, PLANS, settings
 from app.db.supabase import service_client
 from app.services import plan as plan_service
 from app.schemas.billing import (
@@ -41,24 +41,30 @@ def verify_hmac(raw_body: bytes, header_hmac: str | None) -> bool:
     return hmac.compare_digest(expected, header_hmac)
 
 
-def subscribe_params(user_id: str) -> SubscribeResponse:
+def subscribe_params(user_id: str, plan_id: str | None = None) -> SubscribeResponse:
+    plan = PLANS.get(plan_id or "") or PLANS[DEFAULT_PLAN_ID]
     invoice_id = uuid.uuid4().hex
     return SubscribeResponse(
         public_id=settings.CLOUDPAYMENTS_PUBLIC_ID,
-        amount=settings.PLAN_PRICE,
+        amount=plan["price"],
         currency=settings.PLAN_CURRENCY,
-        description=settings.PLAN_NAME,
+        description=plan["name"],
         account_id=user_id,
         invoice_id=invoice_id,
-        interval=settings.PLAN_INTERVAL,
-        period=settings.PLAN_PERIOD,
+        interval=plan["interval"],
+        period=plan["period"],
     )
 
 
-def _period_end(now: datetime) -> datetime:
-    """End of the paid period. Month ≈ 30 days (good enough for plan gating)."""
-    days = 30 * settings.PLAN_PERIOD if settings.PLAN_INTERVAL == "Month" else settings.PLAN_PERIOD
-    return now + timedelta(days=days)
+def _plan_for_amount(amount: int | None) -> dict | None:
+    """Match a charged Amount back to a plan (no plan id in CP webhooks)."""
+    return next((p for p in PLANS.values() if p["price"] == amount), None)
+
+
+def _period_end(now: datetime, amount: int | None) -> datetime:
+    """End of the paid period, from the charged Amount. Unknown → default plan."""
+    plan = _plan_for_amount(amount) or PLANS[DEFAULT_PLAN_ID]
+    return now + timedelta(days=plan["period_days"])
 
 
 def process_payment(fields: dict[str, str]) -> dict:
@@ -77,7 +83,7 @@ def process_payment(fields: dict[str, str]) -> dict:
     amount = _parse_amount(fields.get("Amount"))
     subscription_id = (fields.get("SubscriptionId") or "").strip() or None
     now = datetime.now(timezone.utc)
-    expires_at = _period_end(now)
+    expires_at = _period_end(now, amount)
 
     row = {
         "user_id": user_id,

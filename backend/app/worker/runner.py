@@ -243,7 +243,7 @@ async def _run_loop(handle: RunnerHandle) -> None:
         # Refill queue when empty.
         if queue.empty():
             try:
-                pushed, skipped_has_test = await produce_jobs(user_id)
+                pushed, skipped_has_test = await produce_jobs(user_id, handle.agent)
             except Exception:
                 logger.exception("producer failed for %s", user_id)
                 pushed, skipped_has_test = 0, 0

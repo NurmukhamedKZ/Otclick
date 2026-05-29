@@ -20,6 +20,7 @@ export type Filter = {
   professional_role: number[] | null;
   excluded_regex: string | null;
   enabled: boolean;
+  ai_filter_enabled: boolean;
   created_at: string | null;
 };
 
@@ -33,6 +34,7 @@ export type FilterCreate = {
   employment?: string | null;
   excluded_regex?: string | null;
   enabled?: boolean;
+  ai_filter_enabled?: boolean;
 };
 
 export type VacancyPreviewItem = {
@@ -140,6 +142,12 @@ export type BillingStatus = {
   next_charge_at: string | null;
   has_access: boolean;
   history: PaymentEntry[];
+};
+
+export type CoverLetterResult = {
+  text: string;
+  cached: boolean;
+  remaining: number | null; // null = pro (unlimited); number = free remaining today
 };
 
 export type NotificationRow = {
