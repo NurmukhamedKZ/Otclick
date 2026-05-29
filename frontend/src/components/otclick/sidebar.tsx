@@ -13,9 +13,17 @@ import {
   ISettings,
   ILogo,
   ILogout,
+  ITelegram,
 } from "@/components/otclick/icons";
 
-type Item = { href?: string; id: string; icon: React.ReactNode; label: string; action?: "signout" };
+type Item = {
+  href?: string;
+  id: string;
+  icon: React.ReactNode;
+  label: string;
+  action?: "signout";
+  external?: boolean;
+};
 
 const NAV: Item[] = [
   { id: "dashboard", href: "/dashboard", icon: <IHome />, label: "Главная" },
@@ -53,6 +61,21 @@ function SidebarBtn({
   const onMouseLeave = (e: React.MouseEvent<HTMLElement>) => {
     if (!active) (e.currentTarget as HTMLElement).style.background = "transparent";
   };
+  if (item.href && item.external) {
+    return (
+      <a
+        href={item.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={item.label}
+        style={style}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
+      >
+        {item.icon}
+      </a>
+    );
+  }
   if (item.href) {
     return (
       <Link
@@ -146,6 +169,16 @@ export default function Sidebar({ email }: { email: string | null }) {
           gap: 6,
         }}
       >
+        <SidebarBtn
+          item={{
+            id: "support",
+            href: "https://t.me/UnixAuto",
+            icon: <ITelegram />,
+            label: "Поддержка",
+            external: true,
+          }}
+          active={false}
+        />
         <SidebarBtn
           item={{ id: "settings", href: "/account", icon: <ISettings />, label: "Настройки" }}
           active={false}
