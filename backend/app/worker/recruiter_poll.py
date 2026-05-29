@@ -62,6 +62,13 @@ async def _process_chat(user_id: str, agent, client, item: dict) -> None:
         target = recruiter.new_employer_message(items, cursor)
         if target is None:
             return
+        # Rejection (Отказ): employer declined — do NOT send the message to the AI.
+        # Advance the cursor so the rejection text is marked handled and never re-evaluated.
+        if (item.get("state") or {}).get("id") == "discard":
+            await recruiter.upsert_cursor(
+                user_id, nid, str(target["id"]), vacancy_id=vacancy_id, employer_name=employer_name
+            )
+            return
         history = recruiter.to_lc_messages(items)
         await agent.answer_recruiter(
             nid, str(target["id"]), history, client,

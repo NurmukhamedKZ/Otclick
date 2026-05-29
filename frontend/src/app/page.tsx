@@ -792,7 +792,7 @@ function Nav() {
         <a href="#pricing" style={{ color: "var(--ink)", textDecoration: "none" }}>Тарифы</a>
       </nav>
       <Link href="/auth">
-        <Btn kind="primary">Войти с hh.ru</Btn>
+        <Btn kind="primary">Войти</Btn>
       </Link>
     </header>
   );

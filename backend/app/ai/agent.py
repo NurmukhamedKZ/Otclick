@@ -43,6 +43,7 @@ class HHAgent:
         )
         self._recruiter_agent = None
         self._resume_summary: str | None = None
+        self._full_resumes: dict[str, dict] = {}
 
     async def write_form_answers(
         self, user_id: str, resume_id: str, vacancy: dict
@@ -53,14 +54,36 @@ class HHAgent:
     async def write_cover_letter(
         self, user_id: str, vacancy: dict, resume: dict, resume_uuid: str
     ) -> str:
-        """Cover letter text. PG cache → self.llm → fallback template."""
+        """Cover letter text. PG cache → self.llm → fallback template.
+
+        `resume` arg is the sparse DB row (title only). Pull the full hh resume
+        payload so the prompt is grounded in the candidate's real experience —
+        fall back to the sparse row if the fetch fails."""
+        full = await self._load_full_resume(resume_uuid)
         return await _generate_cover_letter(
             self.llm,
             user_id=user_id,
             vacancy=vacancy,
-            resume=resume,
+            resume=full or resume,
             resume_uuid=resume_uuid,
         )
+
+    async def _load_full_resume(self, resume_uuid: str) -> dict | None:
+        """Full hh resume payload, cached per resume_uuid (same as the
+        recruiter path's _resume_summary). None on failure → caller falls back."""
+        if resume_uuid in self._full_resumes:
+            return self._full_resumes[resume_uuid]
+        from app.services.form_filler import load_resume
+        try:
+            resume = await load_resume(self.user_id, resume_uuid)
+            self._full_resumes[resume_uuid] = resume
+            return resume
+        except Exception:
+            logger.warning(
+                "cover_letter: full resume load failed for %s — using sparse row",
+                self.user_id, exc_info=True,
+            )
+            return None
 
     async def _load_resume_summary(self) -> str:
         if self._resume_summary is not None:

@@ -84,6 +84,29 @@ async def test_poll_skips_already_handled():
 
 
 @pytest.mark.asyncio
+async def test_poll_skips_ai_on_rejection_but_advances_cursor():
+    from app.worker import recruiter_poll as rp
+    # Employer rejected (state.id == "discard") — never feed the rejection to the AI,
+    # but advance the cursor so it is not re-evaluated next poll.
+    negotiations = [{"id": "n9", "has_updates": True, "state": {"id": "discard"},
+                     "vacancy": {"id": "v1", "employer": {"name": "Acme"}}}]
+    messages = [{"id": "m5", "author": {"participant_type": "employer"},
+                 "text": "К сожалению, мы вынуждены вам отказать."}]
+    client = _client_with(negotiations, messages)
+    agent = MagicMock()
+    agent.answer_recruiter = AsyncMock()
+    with patch.object(rp, "load_api_client", new=AsyncMock(return_value=client)), \
+         patch.object(rp, "persist_if_refreshed", new=AsyncMock()), \
+         patch.object(rp.recruiter, "get_cursor", new=AsyncMock(return_value=None)), \
+         patch.object(rp.recruiter, "upsert_cursor", new=AsyncMock()) as upsert, \
+         patch.object(rp.asyncio, "sleep", new=AsyncMock()):
+        await rp.poll_recruiter_chats("u1", agent)
+    agent.answer_recruiter.assert_not_awaited()
+    upsert.assert_awaited_once()
+    assert upsert.await_args.args[2] == "m5"
+
+
+@pytest.mark.asyncio
 async def test_poll_swallows_send_error_keeps_cursor():
     from app.worker import recruiter_poll as rp
     negotiations = [{"id": "n9", "has_updates": True, "vacancy": {}}]

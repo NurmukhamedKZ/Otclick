@@ -59,7 +59,7 @@ async def do_todo(ctx: RecruiterContext, title: str, detail: str, link: str | No
 
 # --- tools (thin adapters; runtime injected by create_agent) -----------------
 
-@tool
+@tool(return_direct=True)
 async def send_message_recruiter(message: str, runtime: ToolRuntime[RecruiterContext]) -> str:
     """Отправить готовый ответ рекрутёру в чат hh.ru от имени кандидата.
 
@@ -91,7 +91,7 @@ async def send_message_recruiter(message: str, runtime: ToolRuntime[RecruiterCon
     return await do_send(runtime.context, message)
 
 
-@tool
+@tool(return_direct=True)
 async def escalate_to_human(draft: str, reason: str, runtime: ToolRuntime[RecruiterContext]) -> str:
     """Сохранить черновик ответа для ручного подтверждения пользователем.
 
@@ -123,7 +123,7 @@ async def escalate_to_human(draft: str, reason: str, runtime: ToolRuntime[Recrui
     return await do_escalate(runtime.context, draft, reason)
 
 
-@tool
+@tool(return_direct=True)
 async def make_todo(title: str, detail: str, link: str | None,
                     runtime: ToolRuntime[RecruiterContext]) -> str:
     """Создать задачу для действия ВНЕ hh.ru (форма, Telegram, звонок, e-mail).
