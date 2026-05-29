@@ -104,3 +104,24 @@ def build_form_text_prompt(question: str, resume_ctx: str) -> str:
         "Ответ: 250 000-300 000 руб на руки в месяц\n\n"
         "Дай только текст ответа, без префикса 'Ответ:'."
     )
+
+
+# --- vacancy relevance ------------------------------------------------------
+
+def build_relevance_prompt(resume_summary: str, items_block: str) -> str:
+    """Classify which vacancies clearly do NOT match the candidate's resume.
+
+    Conservative: only flag clear mismatches; when in doubt, keep (omit)."""
+    return (
+        "Ты фильтруешь вакансии для кандидата по его резюме. Твоя задача — "
+        "найти ТОЛЬКО те вакансии, которые ЯВНО НЕ подходят кандидату по сути "
+        "(другая профессия/специализация: например AI-инженеру не подходят "
+        "'Менеджер по продажам', 'Android-разработчик', 'Бухгалтер').\n"
+        "ПРАВИЛО: сомневаешься — НЕ помечай (оставь). Помечай только очевидные "
+        "несовпадения профессии.\n\n"
+        f"Резюме кандидата:\n{resume_summary or '(нет данных)'}\n\n"
+        f"Вакансии:\n{items_block}\n\n"
+        'Верни СТРОГО JSON без пояснений в формате: '
+        '{"irrelevant": [{"id": "<id>", "reason": "<кратко почему>"}]}. '
+        "Если все подходят — верни {\"irrelevant\": []}."
+    )
