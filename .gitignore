@@ -18,3 +18,4 @@ wheels/
 hh-applicant-tool/
 
 .wordstat.env
+.gstack/

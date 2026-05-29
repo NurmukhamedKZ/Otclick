@@ -69,3 +69,20 @@ body::before {
 @keyframes oc-fadein { from { opacity: 0; } to { opacity: 1; } }
 @keyframes oc-slidein { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 @keyframes oc-pop { 0% { transform: scale(.3); } 60% { transform: scale(1.1); } 100% { transform: scale(1); } }
+
+/* landing marquee */
+@keyframes oc-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.oc-marquee-track { display: flex; gap: 12px; width: max-content; animation: oc-marquee 32s linear infinite; }
+.oc-marquee:hover .oc-marquee-track { animation-play-state: paused; }
+
+html { scroll-behavior: smooth; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .oc-marquee-track { animation: none; }
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}
