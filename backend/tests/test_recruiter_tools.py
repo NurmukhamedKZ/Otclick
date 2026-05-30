@@ -17,10 +17,11 @@ class _Spy:
         return None
 
 
-def _ctx(client=None):
+def _ctx(client=None, labels=None):
     from app.ai.recruiter_tools import RecruiterContext
     return RecruiterContext(user_id="u1", negotiation_id="n9", message_id="m5",
-                            client=client or MagicMock(access_token="tok"))
+                            client=client or MagicMock(access_token="tok"),
+                            quick_reply_labels=labels)
 
 
 @pytest.mark.asyncio
@@ -54,7 +55,36 @@ async def test_do_todo_inserts_and_notifies():
     assert out == "todo_created"
 
 
-def test_recruiter_tools_list_has_three_tools():
+@pytest.mark.asyncio
+async def test_do_answer_button_sends_exact_label():
+    from app.ai import recruiter_tools as rt
+    # model echoed the label inside a sentence — must resolve to the verbatim
+    # label string (here 'Нет ' with its trailing space) and post it as-is.
+    ctx = _ctx(labels=["Да, есть", "Нет "])
+    out = await rt.do_answer_button(ctx, "Думаю, Нет")
+    ctx.client.post.assert_called_once_with("negotiations/n9/messages", {"message": "Нет "})
+    assert out == "sent"
+
+
+@pytest.mark.asyncio
+async def test_do_answer_button_rejects_unmatched_label():
+    from app.ai import recruiter_tools as rt
+    ctx = _ctx(labels=["Да", "Нет"])
+    out = await rt.do_answer_button(ctx, "Перезвоните завтра")
+    ctx.client.post.assert_not_called()  # never send free text disguised as a label
+    assert out.startswith("error:")
+
+
+def test_match_label_prefers_exact_over_substring():
+    from app.ai.recruiter_tools import match_label
+    assert match_label(["Да", "Да, есть"], "Да") == "Да"
+    assert match_label(["Yes", "No"], "yes") == "Yes"
+    assert match_label(["Да", "Нет"], "ничего") is None
+
+
+def test_recruiter_tools_list_has_all_tools():
     from app.ai.recruiter_tools import RECRUITER_TOOLS
     names = {t.name for t in RECRUITER_TOOLS}
-    assert names == {"send_message_recruiter", "escalate_to_human", "make_todo"}
+    assert names == {
+        "send_message_recruiter", "escalate_to_human", "make_todo", "answer_with_button",
+    }

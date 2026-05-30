@@ -27,6 +27,28 @@ class RecruiterContext:
     message_id: str
     client: ApiClient
     question_text: str | None = None
+    quick_reply_labels: list[str] | None = None
+
+
+def match_label(labels: list[str], text: str | None) -> str | None:
+    """Resolve a model-supplied answer to one of the bot's exact button labels.
+
+    The hh robot accepts a reply ONLY when it matches a label verbatim, so we
+    map the model's text back to the real label string (preserving e.g. a
+    trailing space). None when it does not map to a single option."""
+    t = (text or "").strip().strip('"').strip()
+    tl = t.lower()
+    for l in labels:  # exact (preferred)
+        if t == l:
+            return l
+    for l in labels:  # equal ignoring label's surrounding whitespace / case
+        if tl == l.strip().lower():
+            return l
+    for l in labels:  # model echoed the label inside a sentence
+        ls = l.strip().lower()
+        if ls and (ls in tl or tl in ls):
+            return l
+    return None
 
 
 # --- side-effect helpers (testable without a ToolRuntime) --------------------
@@ -37,6 +59,22 @@ async def do_send(ctx: RecruiterContext, message: str) -> str:
     await loop.run_in_executor(
         None,
         lambda: ctx.client.post(f"negotiations/{ctx.negotiation_id}/messages", {"message": clean}),
+    )
+    return "sent"
+
+
+async def do_answer_button(ctx: RecruiterContext, label: str) -> str:
+    """Send the EXACT button label the robot-recruiter expects. The label text
+    is sent verbatim (no sanitize) so it matches; free text would loop."""
+    matched = match_label(ctx.quick_reply_labels or [], label)
+    if matched is None:
+        return f"error: '{label}' не входит в варианты {ctx.quick_reply_labels}"
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        None,
+        lambda: ctx.client.post(
+            f"negotiations/{ctx.negotiation_id}/messages", {"message": matched}
+        ),
     )
     return "sent"
 
@@ -161,4 +199,32 @@ async def make_todo(title: str, detail: str, link: str | None,
     return await do_todo(runtime.context, title, detail, link)
 
 
-RECRUITER_TOOLS = [send_message_recruiter, escalate_to_human, make_todo]
+@tool(return_direct=True)
+async def answer_with_button(label: str, runtime: ToolRuntime[RecruiterContext]) -> str:
+    """Ответить роботу-рекрутёру, выбрав ОДИН готовый вариант ответа (кнопку).
+
+    КОГДА ИСПОЛЬЗОВАТЬ:
+    - К последнему сообщению робота приложены кнопки-варианты (их список дан
+      в задании). Робот примет ответ ТОЛЬКО если текст точно совпадает с
+      вариантом — поэтому обычный send_message_recruiter тут НЕ работает
+      (робот зациклится и переспросит).
+    - Выбирай правдиво на основе резюме кандидата.
+
+    КОГДА НЕ ИСПОЛЬЗОВАТЬ:
+    - Кнопок нет (свободный вопрос) → send_message_recruiter.
+    - Ни один вариант не подходит / неоднозначно → escalate_to_human.
+
+    PARAMETERS:
+    - label (str, required): ТОЧНЫЙ текст одного из предложенных вариантов,
+      скопированный дословно (включая регистр и пробелы). НЕ перефразируй.
+      Пример: варианты ['Да, есть', 'Нет '] → label="Да, есть".
+
+    RETURNS: "sent" при успехе; строку "error: ..." если label не совпал с
+    вариантами (тогда выбери корректный вариант или escalate_to_human).
+    """
+    return await do_answer_button(runtime.context, label)
+
+
+RECRUITER_TOOLS = [
+    send_message_recruiter, escalate_to_human, make_todo, answer_with_button,
+]

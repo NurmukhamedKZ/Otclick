@@ -126,7 +126,7 @@ async def test_poll_swallows_send_error_keeps_cursor():
 
 
 @pytest.mark.asyncio
-async def test_poll_bot_buttons_answers_with_label():
+async def test_poll_bot_buttons_routes_to_choice_agent():
     from app.worker import recruiter_poll as rp
     negotiations = [{"id": "n9", "has_updates": True,
                      "vacancy": {"id": "v1", "employer": {"name": "Acme"}}}]
@@ -135,49 +135,21 @@ async def test_poll_bot_buttons_answers_with_label():
     client = _client_with(negotiations, messages)
     agent = MagicMock()
     agent.answer_recruiter = AsyncMock()
-    agent.answer_recruiter_choice = AsyncMock(return_value=True)
+    agent.answer_recruiter_choice = AsyncMock()
     buttons = ("Подходит ли вам 100 тыс?", ["Да", "Рассматриваю зарплату выше"])
     with patch.object(rp, "load_api_client", new=AsyncMock(return_value=client)), \
          patch.object(rp, "persist_if_refreshed", new=AsyncMock()), \
          patch.object(rp.chatik, "bot_buttons", new=AsyncMock(return_value=buttons)), \
          patch.object(rp.recruiter, "get_cursor", new=AsyncMock(return_value=None)), \
-         patch.object(rp.recruiter, "insert_draft", new=AsyncMock()) as draft, \
          patch.object(rp.recruiter, "upsert_cursor", new=AsyncMock()) as upsert, \
          patch.object(rp.asyncio, "sleep", new=AsyncMock()):
         await rp.poll_recruiter_chats("u1", agent)
-    # button path: choice tool used, free-text agent NOT used, no escalation
+    # button path: choice agent used (with nid, message_id, question, labels),
+    # free-text agent NOT used; cursor advanced.
     agent.answer_recruiter_choice.assert_awaited_once()
     ca = agent.answer_recruiter_choice.await_args
-    assert ca.args[0] == "n9" and ca.args[2] == buttons[0] and ca.args[3] == buttons[1]
-    agent.answer_recruiter.assert_not_awaited()
-    draft.assert_not_awaited()
-    upsert.assert_awaited_once()
-    assert upsert.await_args.args[2] == "m5"
-
-
-@pytest.mark.asyncio
-async def test_poll_bot_buttons_escalates_when_choice_fails():
-    from app.worker import recruiter_poll as rp
-    negotiations = [{"id": "n9", "has_updates": True,
-                     "vacancy": {"id": "v1", "employer": {"name": "Acme"}}}]
-    messages = [{"id": "m5", "author": {"participant_type": "employer"}, "text": "Готовы?"}]
-    client = _client_with(negotiations, messages)
-    agent = MagicMock()
-    agent.answer_recruiter = AsyncMock()
-    agent.answer_recruiter_choice = AsyncMock(return_value=False)  # ambiguous
-    buttons = ("Готовы?", ["Да", "Нет"])
-    with patch.object(rp, "load_api_client", new=AsyncMock(return_value=client)), \
-         patch.object(rp, "persist_if_refreshed", new=AsyncMock()), \
-         patch.object(rp.chatik, "bot_buttons", new=AsyncMock(return_value=buttons)), \
-         patch.object(rp, "notify", new=AsyncMock()) as notif, \
-         patch.object(rp.recruiter, "get_cursor", new=AsyncMock(return_value=None)), \
-         patch.object(rp.recruiter, "insert_draft", new=AsyncMock()) as draft, \
-         patch.object(rp.recruiter, "upsert_cursor", new=AsyncMock()) as upsert, \
-         patch.object(rp.asyncio, "sleep", new=AsyncMock()):
-        await rp.poll_recruiter_chats("u1", agent)
-    # could not pick a label → escalate to user, never send free text, advance cursor
-    draft.assert_awaited_once()
-    notif.assert_awaited_once()
+    assert ca.args[0] == "n9" and ca.args[1] == "m5"
+    assert ca.args[4] == buttons[0] and ca.args[5] == buttons[1]
     agent.answer_recruiter.assert_not_awaited()
     upsert.assert_awaited_once()
     assert upsert.await_args.args[2] == "m5"

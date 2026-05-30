@@ -35,8 +35,12 @@ RECRUITER_RULES = """\
 
 Реши, что делать с последним сообщением, и вызови РОВНО ОДИН инструмент (или ни одного):
 
-- send_message_recruiter(message): закрытый вопрос, ответ ЕСТЬ в резюме
-  (зарплата, опыт, навыки, город, удалёнка). Отвечай прямо и коротко.
+- answer_with_button(label): к последнему сообщению робота приложены кнопки-
+  варианты (список будет дан). Робот примет ТОЛЬКО точный текст варианта -
+  выбери один правдивый по резюме, label = его ДОСЛОВНЫЙ текст. НЕ отвечай на
+  такой вопрос через send_message_recruiter (зациклится).
+- send_message_recruiter(message): закрытый вопрос БЕЗ кнопок, ответ ЕСТЬ в
+  резюме (зарплата, опыт, навыки, город, удалёнка). Отвечай прямо и коротко.
 - escalate_to_human(draft, reason): всё неоднозначное - назначение собеседования,
   запрос данных не из резюме, решение для человека. draft - короткий ответ,
   reason - кратко почему.
@@ -56,26 +60,6 @@ def build_recruiter_prompt(resume_summary: str) -> str:
     """Recruiter system prompt grounded in candidate resume."""
     resume = resume_summary.strip() or "(резюме недоступно)"
     return f"{RECRUITER_RULES}\n\nРезюме кандидата:\n{resume}\n"
-
-
-def build_recruiter_choice_prompt(
-    resume_summary: str, question: str, labels: list[str]
-) -> str:
-    """Pick one quick-reply button label for a robot-recruiter question.
-
-    The hh robot accepts an answer ONLY when it exactly matches a button label,
-    so the model must return one label verbatim — no rephrasing."""
-    opts = "\n".join(f"- {l}" for l in labels)
-    return (
-        "Робот-рекрутёр на hh.ru задал вопрос с готовыми вариантами ответа "
-        "(кнопками). Выбери ОДИН вариант от имени кандидата, правдиво и на "
-        "основе его резюме.\n"
-        f"Резюме кандидата:\n{resume_summary or '(нет данных)'}\n\n"
-        f"Вопрос: {question or '(см. варианты)'}\n"
-        f"Варианты ответа:\n{opts}\n\n"
-        "Верни ТОЛЬКО текст одного варианта, ДОСЛОВНО как в списке: без кавычек, "
-        "без пояснений, без изменений."
-    )
 
 
 # --- cover letter ------------------------------------------------------------

@@ -47,42 +47,37 @@ async def test_answer_recruiter_invokes_agent_with_context():
 
 
 @pytest.mark.asyncio
-async def test_answer_recruiter_choice_sends_exact_label():
+async def test_answer_recruiter_choice_invokes_agent_with_labels():
     from app.ai.agent import HHAgent
     agent = HHAgent("u1")
-    agent._resume_summary = "Зарплата: 90 тыс"
-    agent.llm = MagicMock()
-    # LLM echoes the label inside a sentence — must still resolve to the verbatim label.
-    agent.llm.ainvoke = AsyncMock(return_value=MagicMock(content="Думаю, подходит: Да"))
-    client = MagicMock()
-    sent = await agent.answer_recruiter_choice(
-        "n9", client, "Подходит 100 тыс?", ["Да", "Рассматриваю зарплату выше"]
-    )
-    assert sent is True
-    endpoint, body = client.post.call_args.args
-    assert endpoint == "negotiations/n9/messages"
-    assert body == {"message": "Да"}  # exact button label, sent verbatim
+    fake_agent = MagicMock()
+    fake_agent.ainvoke = AsyncMock(return_value={"messages": []})
+    agent._recruiter_agent = fake_agent
+    agent._resume_summary = "ready"
+    labels = ["Да", "Рассматриваю зарплату выше"]
+    with patch("app.ai.agent.settings") as s:
+        s.OPENAI_API_KEY = "sk-test"
+        await agent.answer_recruiter_choice(
+            "n9", "m5", [("user", "Подходит 100 тыс?")],
+            client=MagicMock(access_token="t"), question="Подходит 100 тыс?", labels=labels,
+        )
+    args, kwargs = fake_agent.ainvoke.call_args
+    # buttons injected into the agent context...
+    ctx = kwargs["context"]
+    assert ctx.quick_reply_labels == labels and ctx.negotiation_id == "n9"
+    # ...and a directive turn appended so the agent picks answer_with_button
+    msgs = args[0]["messages"]
+    assert any("answer_with_button" in m[1] for m in msgs if isinstance(m, tuple))
+    assert kwargs["config"]["configurable"]["thread_id"] == "n9"
 
 
 @pytest.mark.asyncio
-async def test_answer_recruiter_choice_returns_false_when_unmatched():
+async def test_answer_recruiter_choice_skips_when_no_api_key():
     from app.ai.agent import HHAgent
     agent = HHAgent("u1")
-    agent._resume_summary = "x"
-    agent.llm = MagicMock()
-    agent.llm.ainvoke = AsyncMock(return_value=MagicMock(content="Перезвоните мне завтра"))
-    client = MagicMock()
-    sent = await agent.answer_recruiter_choice("n9", client, "Готовы?", ["Да", "Нет"])
-    assert sent is False
-    client.post.assert_not_called()  # never guess a label / never send free text
-
-
-@pytest.mark.asyncio
-async def test_answer_recruiter_choice_no_llm_returns_false():
-    from app.ai.agent import HHAgent
-    agent = HHAgent("u1")
-    agent.llm = None
-    client = MagicMock()
-    sent = await agent.answer_recruiter_choice("n9", client, "Готовы?", ["Да", "Нет"])
-    assert sent is False
-    client.post.assert_not_called()
+    with patch("app.ai.agent.settings") as s:
+        s.OPENAI_API_KEY = ""
+        agent._build_recruiter_agent = MagicMock(side_effect=AssertionError("must not build"))
+        await agent.answer_recruiter_choice(
+            "n9", "m5", [], client=MagicMock(), question="q", labels=["Да", "Нет"]
+        )
