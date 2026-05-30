@@ -13,7 +13,7 @@ export default function LimitRing() {
     refetchInterval: 15000,
   });
 
-  const goal = status?.daily_limit ?? 150;
+  const goal = status?.daily_limit ?? 30;
   const current = status?.today_count ?? 0;
   const pct = goal > 0 ? Math.min(current / goal, 1) : 0;
   const C = 2 * Math.PI * 52;

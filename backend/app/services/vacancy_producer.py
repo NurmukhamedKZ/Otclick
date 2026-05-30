@@ -16,7 +16,7 @@ from app.worker.queue import ApplyJob, get_user_queue
 logger = logging.getLogger(__name__)
 
 PER_PAGE = 50
-MAX_PUSH_PER_RUN = 100
+MAX_PUSH_PER_RUN = 30
 MAX_PAGES_PER_FILTER = 20
 
 

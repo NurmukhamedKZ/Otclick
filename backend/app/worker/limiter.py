@@ -1,4 +1,4 @@
-"""Per-user apply rate limits: 150/day (local TZ) + 20/hour (UTC sliding)."""
+"""Per-user apply rate limits: 30/day (local TZ) + 20/hour (UTC sliding)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from app.db.supabase import service_client
 
 logger = logging.getLogger(__name__)
 
-DAILY_LIMIT = 150
+DAILY_LIMIT = 30
 HOURLY_LIMIT = 20
 DEFAULT_TZ = "Asia/Almaty"
 

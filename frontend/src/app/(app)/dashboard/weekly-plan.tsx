@@ -46,7 +46,7 @@ export default function WeeklyPlan() {
     };
   }, [supabase]);
 
-  const dailyLimit = status?.daily_limit ?? 150;
+  const dailyLimit = status?.daily_limit ?? 30;
   const goal = dailyLimit * 7;
   const pct = goal > 0 ? Math.min(weekSent / goal, 1) : 0;
   const start = startOfWeek(new Date());
