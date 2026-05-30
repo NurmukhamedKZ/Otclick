@@ -61,6 +61,7 @@ export default function AuthPage() {
 
   return (
     <div
+      className="oc-auth-grid"
       style={{
         minHeight: "100vh",
         display: "grid",
@@ -71,6 +72,7 @@ export default function AuthPage() {
       }}
     >
       <div
+        className="oc-auth-hero"
         style={{
           background: "var(--ink)",
           color: "#F5F1E6",

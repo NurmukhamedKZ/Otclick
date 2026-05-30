@@ -26,6 +26,7 @@
 }
 
 html { color-scheme: light; height: 100%; }
+html, body { overflow-x: clip; }
 
 body {
   margin: 0;
@@ -85,4 +86,67 @@ html { scroll-behavior: smooth; }
     animation-iteration-count: 1 !important;
     transition-duration: .001ms !important;
   }
+}
+
+/* ============ responsive (mobile) ============ */
+.oc-mobile-only { display: none; }
+
+@media (max-width: 720px) {
+  /* app shell makes room for the fixed bottom tab bar */
+  .oc-app-shell { padding: 10px 10px 92px !important; }
+  .oc-app-main { padding: 4px 2px 24px !important; }
+
+  /* sidebar -> fixed bottom tab bar */
+  .oc-sidebar {
+    position: fixed !important;
+    inset: auto 0 0 0 !important;
+    top: auto !important;
+    width: auto !important;
+    height: auto !important;
+    flex-direction: row !important;
+    align-items: center;
+    justify-content: center;
+    gap: 0 !important;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+    background: var(--surface);
+    box-shadow: 0 -2px 18px -8px rgba(26, 27, 31, 0.3);
+    border-radius: 18px 18px 0 0;
+    z-index: 50;
+  }
+  .oc-sidebar-logo,
+  .oc-sidebar-spacer,
+  .oc-sidebar-secondary,
+  .oc-sidebar-avatar { display: none !important; }
+  .oc-sidebar-nav {
+    flex-direction: row !important;
+    width: 100%;
+    justify-content: space-around;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    gap: 2px !important;
+  }
+
+  /* landing top nav: drop center anchor links */
+  .oc-landing-links { display: none !important; }
+
+  /* wide px-grid tables -> horizontal scroll */
+  .oc-scroll-x { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+  .oc-scroll-x > * { min-width: 720px; }
+
+  /* chats: stack list over conversation */
+  .oc-chat-card { flex-direction: column !important; height: auto !important; min-height: 0 !important; }
+  .oc-chat-aside {
+    width: 100% !important;
+    max-height: 40vh;
+    border-right: none !important;
+    border-bottom: 1px solid var(--line);
+  }
+
+  /* auth split -> form only */
+  .oc-auth-grid { grid-template-columns: 1fr !important; }
+  .oc-auth-hero { display: none !important; }
+
+  .oc-mobile-only { display: revert; }
+  .oc-desktop-only { display: none !important; }
 }

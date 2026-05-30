@@ -89,7 +89,7 @@ export default function Home() {
         width: "100%",
         maxWidth: 1400,
         margin: "0 auto",
-        padding: "20px 32px 60px",
+        padding: "20px clamp(16px, 4vw, 32px) 60px",
         position: "relative",
         zIndex: 1,
       }}
@@ -100,7 +100,7 @@ export default function Home() {
       <section
         style={{
           display: "grid",
-          gridTemplateColumns: "1.05fr 0.95fr",
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))",
           gap: 48,
           alignItems: "center",
           padding: "56px 0 36px",
@@ -129,7 +129,7 @@ export default function Home() {
           <Reveal y={22} delay={0.05}>
             <h1
               style={{
-                fontSize: 72,
+                fontSize: "clamp(40px, 9vw, 72px)",
                 lineHeight: 0.98,
                 margin: 0,
                 fontWeight: 700,
@@ -240,7 +240,7 @@ export default function Home() {
       </div>
 
       {/* ============ PAIN (the problem) ============ */}
-      <Card tone="dark" style={{ padding: "56px 48px", marginBottom: 110, overflow: "hidden" }}>
+      <Card tone="dark" style={{ padding: "clamp(32px, 6vw, 56px) clamp(20px, 5vw, 48px)", marginBottom: 110, overflow: "hidden" }}>
         <Reveal>
           <div style={{ textAlign: "center", maxWidth: 640, margin: "0 auto 44px" }}>
             <div
@@ -255,7 +255,7 @@ export default function Home() {
             >
               Знакомо?
             </div>
-            <h2 style={{ fontSize: 48, fontWeight: 700, letterSpacing: -1.8, margin: 0, color: "#F5F1E6" }}>
+            <h2 style={{ fontSize: "clamp(30px, 7vw, 48px)", fontWeight: 700, letterSpacing: -1.8, margin: 0, color: "#F5F1E6" }}>
               Поиск работы превратился{" "}
               <span className="serif" style={{ fontWeight: 400, color: "var(--coral)" }}>
                 в работу
@@ -267,7 +267,7 @@ export default function Home() {
         <StaggerGroup
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(2, 1fr)",
+            gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))",
             gap: 16,
             maxWidth: 820,
             margin: "0 auto",
@@ -315,7 +315,7 @@ export default function Home() {
         <Reveal>
           <div style={{ textAlign: "center", marginBottom: 56 }}>
             <Eyebrow>✦ Просто как раз-два-три</Eyebrow>
-            <h2 style={{ fontSize: 52, fontWeight: 700, letterSpacing: -2, margin: 0 }}>
+            <h2 style={{ fontSize: "clamp(32px, 7vw, 52px)", fontWeight: 700, letterSpacing: -2, margin: 0 }}>
               Три шага до{" "}
               <span className="serif" style={{ fontWeight: 400, color: "var(--coral)" }}>
                 автопилота
@@ -324,7 +324,7 @@ export default function Home() {
           </div>
         </Reveal>
 
-        <StaggerGroup style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 18 }}>
+        <StaggerGroup style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))", gap: 18 }}>
           {STEPS.map((s) => (
             <StaggerItem key={s.n}>
               <Lift style={{ height: "100%" }}>
@@ -349,7 +349,7 @@ export default function Home() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1fr 1fr",
+            gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))",
             gap: 56,
             alignItems: "center",
           }}
@@ -359,7 +359,7 @@ export default function Home() {
               <Tag tone="coral" style={{ marginBottom: 18 }}>
                 ★ наш дифференциатор
               </Tag>
-              <h2 style={{ fontSize: 46, fontWeight: 700, letterSpacing: -1.6, margin: 0, lineHeight: 1.05 }}>
+              <h2 style={{ fontSize: "clamp(30px, 7vw, 46px)", fontWeight: 700, letterSpacing: -1.6, margin: 0, lineHeight: 1.05 }}>
                 Агент отвечает рекрутёрам и{" "}
                 <span className="serif" style={{ fontWeight: 400, color: "var(--coral)" }}>
                   доводит до оффера
@@ -407,7 +407,7 @@ export default function Home() {
         <Reveal>
           <div style={{ textAlign: "center", marginBottom: 56 }}>
             <Eyebrow>⚡ Всё в одном месте</Eyebrow>
-            <h2 style={{ fontSize: 52, fontWeight: 700, letterSpacing: -2, margin: 0 }}>
+            <h2 style={{ fontSize: "clamp(32px, 7vw, 52px)", fontWeight: 700, letterSpacing: -2, margin: 0 }}>
               Всё для{" "}
               <span className="serif" style={{ fontWeight: 400, color: "var(--coral)" }}>
                 результата
@@ -419,7 +419,7 @@ export default function Home() {
           </div>
         </Reveal>
 
-        <StaggerGroup style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 18 }}>
+        <StaggerGroup style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))", gap: 18 }}>
           <StaggerItem>
             <BentoCard title="AI-сопроводительные" sub="Под каждую вакансию hh, не шаблон. Анализ требований и подбор опыта." visual={<BentoLetter />} />
           </StaggerItem>
@@ -445,7 +445,7 @@ export default function Home() {
       <section id="security" style={{ marginBottom: 110, textAlign: "center", scrollMarginTop: 24 }}>
         <Reveal>
           <Eyebrow>◆ Спокойно за аккаунт</Eyebrow>
-          <h2 style={{ fontSize: 52, fontWeight: 700, letterSpacing: -2, margin: 0 }}>
+          <h2 style={{ fontSize: "clamp(32px, 7vw, 52px)", fontWeight: 700, letterSpacing: -2, margin: 0 }}>
             Работаем как{" "}
             <span className="serif" style={{ fontWeight: 400, color: "var(--coral)" }}>
               живой человек
@@ -460,7 +460,7 @@ export default function Home() {
         <StaggerGroup
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
+            gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
             gap: 18,
             marginTop: 56,
             textAlign: "left",
@@ -497,7 +497,7 @@ export default function Home() {
         <Reveal>
           <div style={{ textAlign: "center", marginBottom: 56 }}>
             <Eyebrow>₽ Простые тарифы</Eyebrow>
-            <h2 style={{ fontSize: 52, fontWeight: 700, letterSpacing: -2, margin: 0 }}>
+            <h2 style={{ fontSize: "clamp(32px, 7vw, 52px)", fontWeight: 700, letterSpacing: -2, margin: 0 }}>
               Плати за{" "}
               <span className="serif" style={{ fontWeight: 400, color: "var(--coral)" }}>
                 офферы
@@ -514,7 +514,7 @@ export default function Home() {
         <StaggerGroup
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
+            gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
             gap: 18,
             alignItems: "stretch",
           }}
@@ -529,10 +529,10 @@ export default function Home() {
 
       {/* ============ FINAL CTA — success vs failure ============ */}
       <Reveal>
-        <Card tone="dark" style={{ padding: 64, textAlign: "center", overflow: "hidden" }}>
+        <Card tone="dark" style={{ padding: "clamp(28px, 6vw, 64px)", textAlign: "center", overflow: "hidden" }}>
           <h2
             style={{
-              fontSize: 52,
+              fontSize: "clamp(32px, 7vw, 52px)",
               fontWeight: 700,
               letterSpacing: -2,
               margin: 0,
@@ -772,7 +772,7 @@ function Nav() {
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "14px 22px",
+        padding: "14px clamp(16px, 4vw, 22px)",
         background: "var(--surface)",
         borderRadius: 22,
         marginBottom: 24,
@@ -786,7 +786,7 @@ function Nav() {
         <ILogo size={32} />
         <span style={{ fontSize: 17, fontWeight: 700 }}>otclick</span>
       </div>
-      <nav style={{ display: "flex", gap: 28, fontSize: 14 }}>
+      <nav className="oc-landing-links" style={{ display: "flex", gap: 28, fontSize: 14 }}>
         <a href="#how" style={{ color: "var(--ink)", textDecoration: "none" }}>Как это работает</a>
         <a href="#security" style={{ color: "var(--ink)", textDecoration: "none" }}>Безопасность</a>
         <a href="#pricing" style={{ color: "var(--ink)", textDecoration: "none" }}>Тарифы</a>

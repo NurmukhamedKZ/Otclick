@@ -243,7 +243,7 @@ export default function ApplicationsPage() {
         </div>
       </Card>
 
-      <Card style={{ padding: 0, overflow: "hidden" }}>
+      <Card className="oc-scroll-x" style={{ padding: 0, overflow: "hidden" }}>
         <div
           style={{
             display: "grid",

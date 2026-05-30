@@ -123,6 +123,7 @@ export default function Sidebar({ email }: { email: string | null }) {
 
   return (
     <aside
+      className="oc-sidebar"
       style={{
         width: 76,
         flexShrink: 0,
@@ -137,12 +138,13 @@ export default function Sidebar({ email }: { email: string | null }) {
         height: "calc(100vh - 32px)",
       }}
     >
-      <div style={{ marginBottom: 8 }}>
+      <div className="oc-sidebar-logo" style={{ marginBottom: 8 }}>
         <Link href="/dashboard" aria-label="otclick">
           <ILogo size={36} />
         </Link>
       </div>
       <div
+        className="oc-sidebar-nav"
         style={{
           background: "var(--surface)",
           borderRadius: 22,
@@ -158,8 +160,9 @@ export default function Sidebar({ email }: { email: string | null }) {
           return <SidebarBtn key={it.id} item={it} active={active} />;
         })}
       </div>
-      <div style={{ flex: 1 }} />
+      <div className="oc-sidebar-spacer" style={{ flex: 1 }} />
       <div
+        className="oc-sidebar-secondary"
         style={{
           background: "var(--surface)",
           borderRadius: 22,
@@ -190,6 +193,7 @@ export default function Sidebar({ email }: { email: string | null }) {
         />
       </div>
       <div
+        className="oc-sidebar-avatar"
         title={email ?? ""}
         style={{
           width: 44,

@@ -546,7 +546,7 @@ function FilterEditor({
         />
       </EditorField>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))", gap: 14 }}>
         <EditorField label="зарплата от">
           <input
             type="number"
@@ -579,7 +579,7 @@ function FilterEditor({
         </EditorField>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))", gap: 14 }}>
         <EditorField label="график">
           <select
             value={schedule}

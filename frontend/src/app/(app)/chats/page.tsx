@@ -336,11 +336,42 @@ function MessagesPane({
           borderBottom: "1px solid var(--line)",
         }}
       >
-        <Avatar name={chat.employer_name} logo={chat.employer_logo} />
+        {chat.vacancy_id ? (
+          <a
+            href={`https://hh.ru/vacancy/${chat.vacancy_id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Открыть вакансию на hh.ru"
+            style={{ flexShrink: 0 }}
+          >
+            <Avatar name={chat.employer_name} logo={chat.employer_logo} />
+          </a>
+        ) : (
+          <Avatar name={chat.employer_name} logo={chat.employer_logo} />
+        )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>
-            {chat.vacancy_name ?? "Без названия"}
-          </div>
+          {chat.vacancy_id ? (
+            <a
+              href={`https://hh.ru/vacancy/${chat.vacancy_id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Открыть вакансию на hh.ru"
+              style={{
+                fontWeight: 700,
+                fontSize: 15,
+                color: "var(--ink)",
+                textDecoration: "none",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+              onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+            >
+              {chat.vacancy_name ?? "Без названия"}
+            </a>
+          ) : (
+            <div style={{ fontWeight: 700, fontSize: 15 }}>
+              {chat.vacancy_name ?? "Без названия"}
+            </div>
+          )}
           <div style={{ fontSize: 13, color: "var(--muted)" }}>
             {chat.employer_name ?? ""}
           </div>
@@ -532,6 +563,7 @@ export default function ChatsPage() {
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <Card
+        className="oc-chat-card"
         style={{
           padding: 0,
           overflow: "hidden",
@@ -541,6 +573,7 @@ export default function ChatsPage() {
         }}
       >
         <aside
+          className="oc-chat-aside"
           style={{
             width: 360,
             flexShrink: 0,

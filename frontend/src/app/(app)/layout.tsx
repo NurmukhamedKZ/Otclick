@@ -22,6 +22,7 @@ export default async function AppLayout({
   return (
     <Providers>
       <div
+        className="oc-app-shell"
         style={{
           minHeight: "100vh",
           display: "flex",
@@ -32,7 +33,7 @@ export default async function AppLayout({
         }}
       >
         <Sidebar email={user.email ?? null} />
-        <main style={{ flex: 1, minWidth: 0, padding: "4px 12px 24px" }}>
+        <main className="oc-app-main" style={{ flex: 1, minWidth: 0, padding: "4px 12px 24px" }}>
           <WorkerBar />
           {children}
         </main>
