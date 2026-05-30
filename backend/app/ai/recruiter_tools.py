@@ -53,29 +53,32 @@ def match_label(labels: list[str], text: str | None) -> str | None:
 
 # --- side-effect helpers (testable without a ToolRuntime) --------------------
 
-async def do_send(ctx: RecruiterContext, message: str) -> str:
-    clean = sanitize_ai_text(message)
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(
-        None,
-        lambda: ctx.client.post(f"negotiations/{ctx.negotiation_id}/messages", {"message": clean}),
-    )
-    return "sent"
-
-
-async def do_answer_button(ctx: RecruiterContext, label: str) -> str:
-    """Send the EXACT button label the robot-recruiter expects. The label text
-    is sent verbatim (no sanitize) so it matches; free text would loop."""
-    matched = match_label(ctx.quick_reply_labels or [], label)
-    if matched is None:
-        return f"error: '{label}' не входит в варианты {ctx.quick_reply_labels}"
+async def _post_message(ctx: RecruiterContext, text: str) -> None:
+    """POST a chat message to hh. Shared transport; callers own the text policy."""
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(
         None,
         lambda: ctx.client.post(
-            f"negotiations/{ctx.negotiation_id}/messages", {"message": matched}
+            f"negotiations/{ctx.negotiation_id}/messages", {"message": text}
         ),
     )
+
+
+async def do_send(ctx: RecruiterContext, message: str) -> str:
+    # free-text reply to a live recruiter — sanitize markdown/em-dashes.
+    await _post_message(ctx, sanitize_ai_text(message))
+    return "sent"
+
+
+async def do_answer_button(ctx: RecruiterContext, label: str) -> str:
+    """Answer a robot-recruiter quick-reply. Unlike do_send, the text MUST be
+    one of the bot's button labels (the bot loops on anything else), so it is
+    validated against the allowed set and sent verbatim — no sanitize, which
+    would e.g. strip a label's trailing space and break the match."""
+    matched = match_label(ctx.quick_reply_labels or [], label)
+    if matched is None:
+        return f"error: '{label}' не входит в варианты {ctx.quick_reply_labels}"
+    await _post_message(ctx, matched)
     return "sent"
 
 
@@ -138,9 +141,13 @@ async def escalate_to_human(draft: str, reason: str, runtime: ToolRuntime[Recrui
     - Запрос данных, которых НЕТ в резюме (паспорт, ИИН, ссылки на профили).
     - Технические вопросы, требующие решения кандидата.
     - Любая неоднозначность, где автоответ может навредить.
+    - Вопрос робота-рекрутёра с кнопками, но ты НЕ можешь уверенно выбрать
+      вариант (нет данных в резюме / неоднозначно) → эскалируй, пусть человек
+      выберет. НЕ угадывай через answer_with_button.
 
     КОГДА НЕ ИСПОЛЬЗОВАТЬ:
     - Ответ есть в резюме → send_message_recruiter.
+    - Вопрос робота с кнопками И вариант понятен по резюме → answer_with_button.
     - Действие вне hh (форма/Telegram/звонок) → make_todo.
 
     PARAMETERS:
@@ -148,9 +155,15 @@ async def escalate_to_human(draft: str, reason: str, runtime: ToolRuntime[Recrui
       отредактирует и отправит. Формат: plain text, 1-3 предложения,
       БЕЗ markdown (*, _, **), БЕЗ длинных тире (—). Длина: 10-500 символов.
       Пример: "Готов в среду в 15:00 МСК, подойдёт?"
+      Для вопроса робота с кнопками: draft = один из вариантов (твоё лучшее
+      предположение, человек поменяет при необходимости).
     - reason (str, required): краткое объяснение ПОЧЕМУ эскалируешь (для UI).
       Формат: одна фраза, 3-15 слов, на русском. БЕЗ markdown.
       Примеры: "назначение времени интервью", "запрос данных не из резюме".
+      ВАЖНО: если это вопрос робота с кнопками и ты не смог выбрать — в reason
+      укажи И причину, ПОЧЕМУ не выбрал, И возможные варианты ответа дословно
+      через " / ". Пример: "нет данных в резюме; варианты: Да / Рассматриваю
+      зарплату выше".
 
     RETURNS: "escalated" при успешном сохранении черновика.
 
