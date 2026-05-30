@@ -1,20 +1,21 @@
-"""hh.ru chatik web API — read robot-recruiter quick-reply buttons.
+"""hh.ru chatik web API — the real source of truth for recruiter chats.
 
-The new hh chat ("Робот-рекрутер") lives on chatik.hh.ru, NOT the legacy
-negotiations API. The legacy `GET /negotiations/{nid}/messages` omits
-`actions.text_buttons`, so the worker reading via that API is blind to the
-allowed answers. The bot accepts a reply ONLY when its text exactly matches a
-button label — free-form prose loops (bot re-asks forever).
+The legacy `GET /negotiations/{nid}/messages` API is frozen: it does NOT reflect
+new chat activity (bot questions, our own replies, and — critically — messages
+from a real recruiter after the robot leaves the chat). hh moved chats to
+`chatik.hh.ru/chatik/api/*`; that backend has everything. Both the worker
+(recruiter agent) and the /chats UI read messages from here.
 
-We read the buttons here over the stored web session (the same cookies the
-form-filler uses) so the recruiter agent can answer with an exact label. No
-browser. The reply itself is still sent via the legacy messages API — those
-messages do land in the chatik chat (verified).
+Read over the stored web session (the same cookies the form-filler uses; cookies
+for `.hh.ru` cover `chatik.hh.ru`). No browser. Replies are still POSTed via the
+legacy messages API — those DO land in the chatik chat (verified).
 
-Endpoints (cookies for .hh.ru cover chatik.hh.ru):
-  GET /chatik/api/chats      → list recent chats; each item maps
-                               resources.NEGOTIATION_TOPIC (= legacy nid) → id (chatId)
-  GET /chatik/api/chat_data  → messages incl. actions.text_buttons
+Endpoints:
+  GET /chatik/api/chats      → ~20 most recent chats (no server-side paging);
+                               item.resources.NEGOTIATION_TOPIC[0] = legacy nid,
+                               item.id = chatId, currentParticipantId = my id,
+                               lastMessage = newest message (drives the trigger).
+  GET /chatik/api/chat_data  → full message list incl. actions.text_buttons.
 """
 
 from __future__ import annotations
@@ -30,12 +31,9 @@ CHATIK = "https://chatik.hh.ru/chatik/api"
 _HEADERS = {"X-Requested-With": "XMLHttpRequest", "Referer": "https://hh.ru/chat"}
 
 
-def _chats_map(session) -> dict[str, dict]:
-    """nid (NEGOTIATION_TOPIC) -> {chat_id, applicant_id} for recent chats.
+# --- sync helpers (run inside an executor) -----------------------------------
 
-    The list is not paginated server-side (returns the ~20 most recent), but
-    the poller only processes chats with `has_updates`, which are recently
-    active and therefore at the top — so one page is enough."""
+def _chat_items(session) -> list[dict]:
     r = session.get(
         f"{CHATIK}/chats",
         params={"do_not_track_session_events": "true"},
@@ -43,17 +41,35 @@ def _chats_map(session) -> dict[str, dict]:
         timeout=15,
     )
     r.raise_for_status()
+    return (r.json().get("chats") or {}).get("items", [])
+
+
+def _chats_map(session) -> dict[str, dict]:
+    """nid (NEGOTIATION_TOPIC) -> chat ref with last-message trigger info.
+
+    Not paginated server-side (returns the ~20 most recent), but active chats
+    are recent and therefore present."""
     out: dict[str, dict] = {}
-    for it in (r.json().get("chats") or {}).get("items", []):
+    for it in _chat_items(session):
         applicant_id = str(it.get("currentParticipantId") or "")
+        lm = it.get("lastMessage") or {}
+        vacancy = (it.get("resources") or {}).get("VACANCY") or []
+        ref = {
+            "chat_id": str(it["id"]),
+            "applicant_id": applicant_id,
+            "vacancy_id": str(vacancy[0]) if vacancy else None,
+            "last_id": str(lm["id"]) if lm.get("id") is not None else None,
+            "last_participant_id": (
+                str(lm["participantId"]) if lm.get("participantId") is not None else None
+            ),
+            "last_is_bot": bool((lm.get("participantDisplay") or {}).get("isBot")),
+        }
         for topic in (it.get("resources") or {}).get("NEGOTIATION_TOPIC") or []:
-            out[str(topic)] = {"chat_id": str(it["id"]), "applicant_id": applicant_id}
+            out[str(topic)] = {"nid": str(topic), **ref}
     return out
 
 
-def _pending_buttons(session, chat_id: str, applicant_id: str) -> tuple[str, list[str]] | None:
-    """If the LAST message in the chat is a bot message with text_buttons, return
-    (question_text, labels). Otherwise None — nothing currently awaiting a tap."""
+def _chat_data(session, chat_id: str, applicant_id: str) -> dict:
     r = session.get(
         f"{CHATIK}/chat_data",
         params={
@@ -65,26 +81,73 @@ def _pending_buttons(session, chat_id: str, applicant_id: str) -> tuple[str, lis
         timeout=15,
     )
     r.raise_for_status()
-    items = (((r.json() or {}).get("chat") or {}).get("messages") or {}).get("items") or []
-    if not items:
-        return None
-    last = items[-1]
-    if not (last.get("participantDisplay") or {}).get("isBot"):
-        return None
-    buttons = (last.get("actions") or {}).get("text_buttons") or []
-    labels = [b["text"] for b in buttons if b.get("text")]
-    if not labels:
-        return None
-    return (last.get("text") or "").strip(), labels
+    return r.json()
 
 
-async def bot_buttons(user_id: str, nid: str) -> tuple[str, list[str]] | None:
-    """Pending robot-recruiter question + its button labels for negotiation `nid`.
+def _norm(m: dict, applicant_id: str) -> dict:
+    """Normalize a chatik message. `from_employer` covers both the bot and a
+    real recruiter (anyone who is not me)."""
+    pd = m.get("participantDisplay") or {}
+    buttons = [
+        b["text"] for b in (m.get("actions") or {}).get("text_buttons") or [] if b.get("text")
+    ]
+    return {
+        "id": str(m.get("id")),
+        "text": (m.get("text") or "").strip(),
+        "created_at": m.get("creationTime"),
+        "from_employer": str(m.get("participantId")) != str(applicant_id),
+        "is_bot": bool(pd.get("isBot")),
+        "name": pd.get("name"),
+        "type": m.get("type"),
+        "buttons": buttons,
+    }
 
-    Returns None when there is no web session, the chat is not in the recent
-    list, or the latest message has no text_buttons (e.g. a live recruiter, or
-    the bot already moved on). Never raises — the caller falls back to the
-    free-text recruiter path."""
+
+def _messages(session, chat_id: str, applicant_id: str) -> list[dict]:
+    data = _chat_data(session, chat_id, applicant_id)
+    items = (((data or {}).get("chat") or {}).get("messages") or {}).get("items") or []
+    return [_norm(m, applicant_id) for m in items]
+
+
+# --- async API ---------------------------------------------------------------
+
+async def recent_chats(user_id: str) -> list[dict] | None:
+    """Recent chat refs (nid, chat_id, applicant_id, last-message info) for the
+    worker's poll trigger. None when there is no web session (reconnect needed)."""
+    loop = asyncio.get_running_loop()
+    try:
+        session = await load_web_session(user_id)
+    except Exception:
+        return None
+    try:
+        return await loop.run_in_executor(None, lambda: list(_chats_map(session).values()))
+    except Exception:
+        logger.warning("chatik: recent_chats failed for %s", user_id, exc_info=True)
+        return None
+
+
+async def chat_messages(user_id: str, chat_id: str, applicant_id: str) -> list[dict] | None:
+    """Normalized messages for a known chat (the worker already has the ref from
+    recent_chats — avoids re-listing). None on no web session / failure."""
+    loop = asyncio.get_running_loop()
+    try:
+        session = await load_web_session(user_id)
+    except Exception:
+        return None
+    try:
+        return await loop.run_in_executor(
+            None, lambda: _messages(session, chat_id, applicant_id)
+        )
+    except Exception:
+        logger.warning("chatik: chat_messages failed chat=%s", chat_id, exc_info=True)
+        return None
+
+
+async def fetch_messages(user_id: str, nid: str) -> list[dict] | None:
+    """Normalized messages for negotiation `nid` over chatik (resolves nid→chat
+    via the chats list). For the /chats UI, which only has the nid. None when
+    there is no web session or the chat is not in the recent list (caller falls
+    back to the legacy API)."""
     loop = asyncio.get_running_loop()
     try:
         session = await load_web_session(user_id)
@@ -95,10 +158,10 @@ async def bot_buttons(user_id: str, nid: str) -> tuple[str, list[str]] | None:
         ref = _chats_map(session).get(str(nid))
         if not ref:
             return None
-        return _pending_buttons(session, ref["chat_id"], ref["applicant_id"])
+        return _messages(session, ref["chat_id"], ref["applicant_id"])
 
     try:
         return await loop.run_in_executor(None, _q)
     except Exception:
-        logger.warning("chatik: buttons fetch failed for nid=%s", nid, exc_info=True)
+        logger.warning("chatik: fetch_messages failed for nid=%s", nid, exc_info=True)
         return None

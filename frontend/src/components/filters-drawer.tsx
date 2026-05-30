@@ -98,9 +98,14 @@ export default function FiltersDrawer() {
   }, [filters, selectedId]);
 
   async function handleCreate() {
+    const firstResume = resumes[0];
+    if (!firstResume) {
+      pushToast({ kind: "error", title: "Сначала синхронизируй резюме" });
+      return;
+    }
     setCreating(true);
     try {
-      const row = await create({ enabled: true });
+      const row = await create({ enabled: true, resume_id: firstResume.id });
       setSelectedId(row.id);
       pushToast({ kind: "success", title: "фильтр создан" });
     } catch (e) {
@@ -596,16 +601,16 @@ function FilterEditor({
             ))}
           </select>
         </EditorField>
-        <EditorField label="резюме">
+        <EditorField label="резюме *">
           <select
             value={resumeId}
             onChange={(e) => {
+              if (!e.target.value) return;
               setResumeId(e.target.value);
-              commit({ resume_id: e.target.value || null });
+              commit({ resume_id: e.target.value });
             }}
             style={inputStyle}
           >
-            <option value="">— любое —</option>
             {resumes.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.title ?? r.hh_resume_id}

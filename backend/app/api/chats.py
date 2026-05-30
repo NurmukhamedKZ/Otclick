@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.api.deps import get_current_user
 from app.db.supabase import service_client
 from app.schemas.recruiter import OkResponse, SendDraftRequest
+from app.services import chatik
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
 
 logger = logging.getLogger(__name__)
@@ -117,12 +118,8 @@ async def _load_response_letter(user_id: str, vacancy_id: str | None) -> dict | 
     }
 
 
-@router.get("/{negotiation_id}/messages")
-async def get_messages(
-    negotiation_id: str,
-    vacancy_id: str | None = Query(None),
-    user_id: str = Depends(get_current_user),
-) -> dict:
+async def _legacy_messages(user_id: str, negotiation_id: str) -> list[dict]:
+    """Fallback when chatik has no web session: the (stale) legacy API."""
     client = await load_api_client(user_id)
     original = client.access_token
     loop = asyncio.get_running_loop()
@@ -137,9 +134,33 @@ async def get_messages(
             raise HTTPException(status_code=502, detail="hh messages request failed") from ex
     finally:
         await persist_if_refreshed(user_id, client, original)
+    return [_message(m) for m in data.get("items", [])]
 
-    raw = data.get("items", [])
-    items = [_message(m) for m in raw]
+
+@router.get("/{negotiation_id}/messages")
+async def get_messages(
+    negotiation_id: str,
+    vacancy_id: str | None = Query(None),
+    user_id: str = Depends(get_current_user),
+) -> dict:
+    # chatik is the source of truth (legacy API misses messages from a real
+    # recruiter after the robot leaves). Fall back to legacy only when there is
+    # no stored web session (chatik returns None).
+    chat_msgs = await chatik.fetch_messages(user_id, negotiation_id)
+    if chat_msgs is None:
+        items = await _legacy_messages(user_id, negotiation_id)
+    else:
+        items = [
+            {
+                "id": m["id"],
+                "text": m["text"],
+                "created_at": m["created_at"],
+                "from_employer": m["from_employer"],
+                "viewed_by_me": True,
+            }
+            for m in chat_msgs
+            if m["text"]
+        ]
 
     db_letter: dict | None = None
     first_applicant_idx = next(

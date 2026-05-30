@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class FilterCreate(BaseModel):
-    resume_id: str | None = None
+    resume_id: str = Field(min_length=1)
     text: str | None = None
     area: int | None = None
     salary_min: int | None = Field(default=None, ge=0)

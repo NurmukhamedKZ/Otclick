@@ -8,7 +8,7 @@ os.environ.setdefault("FERNET_KEY", "kPpDeJjFqDppkMm6QHzqFkkSgFwsKtGzh4WeZ5dKZHc
 
 def test_filter_create_defaults_ai_filter_enabled_true():
     from app.schemas.filters import FilterCreate
-    assert FilterCreate().ai_filter_enabled is True
+    assert FilterCreate(resume_id="r1").ai_filter_enabled is True
 
 
 def test_filter_update_accepts_ai_filter_enabled():
