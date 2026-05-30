@@ -84,7 +84,7 @@ api/
   _debug.py                  — debug-only routes, mounted iff DEBUG_ENDPOINTS
   router.py                  — aggregates all routers
 ai/
-  agent.py                   — HHAgent: one ChatOpenAI shared by every AI path (see below)
+  agent.py                   — HHAgent: one ChatOpenAI shared by every AI path (write_form_answers, write_cover_letter, answer_recruiter, answer_recruiter_choice, filter_relevant_vacancies) — see below
   prompts.py                 — system prompts + builders; sanitize_ai_text (strip md/em-dashes)
   recruiter_tools.py         — langchain @tool defs for recruiter agent (send / escalate / make_todo)
 worker/
@@ -108,7 +108,7 @@ services/
   token_refresh.py           — refresh_user (one) + refresh_due (near-expiry cron batch)
   resume_sync.py             — pull /resumes/mine → upsert resumes table
   filters_service.py         — filters CRUD + vacancy preview with excluded_regex
-  vacancy_producer.py        — search per enabled filter → dedup/blacklist/exclude → queue
+  vacancy_producer.py        — search per enabled filter → dedup/blacklist/exclude → AI relevance filter (if filter.ai_filter_enabled) → queue
   apply.py                   — apply_one: one /negotiations submit; maps hh errors → ApplyStatus
   form_filler.py             — solve vacancy tests over hh.ru web session (no browser); returns answers, no submit
   form_drafts.py             — form-draft persistence + approval; approve() re-fetches xsrf, posts to hh
@@ -118,6 +118,8 @@ services/
   plan.py                    — has_access / check_access + filter_accessible (drops users w/o plan)
   captcha.py                 — captcha_requests create/solve/dismiss helpers
   recruiter.py               — recruiter-chat persistence + new_employer_message cursor; shared by tools/poller/API
+  chatik.py                  — chatik.hh.ru web API client (recent_chats/chat_messages/fetch_messages); real source of truth for chats — legacy negotiations API is frozen. Reads over stored web session (same cookies as form_filler), no browser
+  relevance.py               — batch semantic relevance filter (filter_relevant) + relevance_cache helpers; conservative + fail-open (any failure → keep all)
   worker_control.py          — persisted on/off intent (profiles.worker_enabled); enabled_active_user_ids
   worker_runtime.py          — runner heartbeat → worker_runtime table so API /api/worker/status can read it
   notifications.py           — insert notifications rows (UI reads via Realtime)
@@ -139,9 +141,9 @@ schemas/
 
 **Form-draft approval**: `form_drafts.py` — AI-filled test answers land as a `form_drafts` row (`pending`). User reviews in the UI; `/api/forms/drafts/{id}/approve` re-fetches xsrf and POSTs to hh (`approve()`), `/discard` dismisses. `form_filler` returns answers only — submission moved here.
 
-**Recruiter chat agent**: each runner loop calls `poll_recruiter_chats` (`worker/recruiter_poll.py`) → fetch negotiations with unread messages → `recruiter.new_employer_message` (cursor on `last_handled_id`, NOT `viewed_by_me`, to avoid double-replies) → `HHAgent.answer_recruiter` (langchain agent w/ per-chat memory + tools in `recruiter_tools.py`). Tools: `send_message_recruiter` (reply on hh), `escalate_to_human` (write `recruiter_drafts` row for user approval via `/api/recruiter/drafts`), `make_todo` (`recruiter_todos`). Errors are logged and never crash the runner loop. Manual chat send also available via `/api/chats/{id}/messages`.
+**Recruiter chat agent**: each runner loop calls `poll_recruiter_chats` (`worker/recruiter_poll.py`) → `chatik.recent_chats` (NOT legacy negotiations API — it's frozen and misses bot questions, our replies, and real-recruiter messages after the robot leaves) → `recruiter.new_employer_message` (cursor on `last_handled_id`, NOT `viewed_by_me`, to avoid double-replies) → `HHAgent.answer_recruiter` or, when the chatik message carries quick-reply buttons (`actions.text_buttons`), `answer_recruiter_choice` (same agent/tools/memory, but the reply MUST exactly match a button label or hh loops). Tools (`recruiter_tools.py`): `send_message_recruiter` (reply on hh — POSTed via legacy messages API, still lands in chatik), `escalate_to_human` (write `recruiter_drafts` row for user approval via `/api/recruiter/drafts`), `make_todo` (`recruiter_todos`). Errors are logged and never crash the runner loop. `/api/chats` reads messages from chatik (falls back to stale legacy API when no web session); manual send via `/api/chats/{id}/messages`.
 
-**Centralized AI (`HHAgent`)**: one `HHAgent` per runner (`ai/agent.py`) wraps a single rate-limited `ChatOpenAI`. ALL LLM work routes through it — `write_form_answers` (form_filler), `write_cover_letter` (cover_letter), `answer_recruiter` (langchain agent w/ per-chat memory + `recruiter_tools.py` tools). No per-call LLM construction. Empty `OPENAI_API_KEY` → helpers fall back to templates/heuristics, never crash. All AI text passes `prompts.sanitize_ai_text` (strips markdown bold/emphasis + em-dashes).
+**Centralized AI (`HHAgent`)**: one `HHAgent` per runner (`ai/agent.py`) wraps a single rate-limited `ChatOpenAI`. ALL LLM work routes through it — `write_form_answers` (form_filler), `write_cover_letter` (cover_letter), `answer_recruiter` / `answer_recruiter_choice` (langchain agent w/ per-chat memory + `recruiter_tools.py` tools), `filter_relevant_vacancies` (relevance, grounded in the filter's resume summary). No per-call LLM construction. Empty `OPENAI_API_KEY` → helpers fall back to templates/heuristics, never crash. All AI text passes `prompts.sanitize_ai_text` (strips markdown bold/emphasis + em-dashes).
 
 **Form-test solving (`form_filler.py`)**: hh vacancy tests are solved over the **hh.ru web session** (not the API) using cookies captured during OAuth login (`web_cookies_encrypted`, Fernet). Parses `vacancyTests` + `xsrfToken` out of the page's inline JSON, answers each task via the shared LLM grounded in a resume summary. No browser, no re-login. **Does not submit** — returns answers; the actual POST to `vacancy_response/popup` happens in `form_drafts.approve()` after user approval. Failure → `form_required` fallback.
 
@@ -195,9 +197,10 @@ Migrations live in `infra/supabase/migrations/` (numbered SQL files).
 - `recruiter_drafts` — agent escalations awaiting human send (incl. `question_text`)
 - `recruiter_todos` — agent-created todos for the user
 - `worker_runtime` — runner heartbeat (state/queued/today_count/next_run_at/last_error), read by API
+- `relevance_cache` — AI vacancy relevance verdicts, unique on `(resume_id, vacancy_id)`; service_role only. Migration 015 also adds `filters.ai_filter_enabled`
 - `captcha-screenshots` — Supabase Storage bucket for captcha images
 
-Migrations 010–014 add the recruiter tables, `worker_enabled`, `form_drafts`, recruiter `question_text`, and `worker_runtime`.
+Migrations 010–015 add the recruiter tables, `worker_enabled`, `form_drafts`, recruiter `question_text`, `worker_runtime`, and the relevance cache + `filters.ai_filter_enabled`.
 
 ## Tests
 

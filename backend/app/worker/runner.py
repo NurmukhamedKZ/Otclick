@@ -44,6 +44,9 @@ IDLE_REFILL_SLEEP_S = 10
 # Plan-B captcha poll interval (seconds) — re-probe GET /me while paused.
 CAPTCHA_POLL_S = 5
 
+# Recruiter chat poll cadence — runs in its own task, independent of apply limits.
+RECRUITER_POLL_INTERVAL_S = 120
+
 
 @dataclass
 class RunnerHandle:
@@ -52,6 +55,7 @@ class RunnerHandle:
     today_count: int = 0
     next_run_at: datetime | None = None
     task: asyncio.Task | None = None
+    recruiter_task: asyncio.Task | None = None
     captcha_event: asyncio.Event = field(default_factory=asyncio.Event)
     cluster: throttle.SessionCluster = field(default_factory=throttle.SessionCluster)
     agent: HHAgent | None = None
@@ -262,12 +266,6 @@ async def _run_loop(handle: RunnerHandle) -> None:
                 await asyncio.sleep(IDLE_REFILL_SLEEP_S)
                 continue
 
-        # Recruiter chats — answer / escalate / todo for new employer messages.
-        try:
-            await poll_recruiter_chats(user_id, handle.agent)
-        except Exception:
-            logger.exception("recruiter poll failed for %s", user_id)
-
         # Session cluster break.
         if handle.cluster.should_break():
             break_s = handle.cluster.next_break_seconds()
@@ -355,6 +353,24 @@ async def _run_loop(handle: RunnerHandle) -> None:
             handle.last_error = f"failed on vacancy {job.vacancy_id}"
 
 
+async def _recruiter_loop(handle: RunnerHandle) -> None:
+    """Answer recruiter chats on a fixed cadence, independent of apply limits.
+
+    Runs as its own task so daily/hourly apply caps (which block the apply loop
+    with a long sleep) and empty-queue idle never stop recruiter replies.
+    Exits when the apply loop marks the handle stopped (token_dead / banned).
+    """
+    user_id = handle.user_id
+    logger.info("recruiter loop: user=%s START", user_id)
+    while handle.state != "stopped":
+        try:
+            await poll_recruiter_chats(user_id, handle.agent)
+        except Exception:
+            logger.exception("recruiter poll failed for %s", user_id)
+        await asyncio.sleep(RECRUITER_POLL_INTERVAL_S)
+    logger.info("recruiter loop: user=%s STOP", user_id)
+
+
 class WorkerRegistry:
     def __init__(self) -> None:
         self._handles: dict[str, RunnerHandle] = {}
@@ -383,6 +399,21 @@ class WorkerRegistry:
                     logger.info("runner: user=%s task ended cleanly", uid)
 
             handle.task.add_done_callback(_on_done)
+
+            handle.recruiter_task = asyncio.create_task(
+                _recruiter_loop(handle), name=f"recruiter:{user_id}"
+            )
+
+            def _on_recruiter_done(t: asyncio.Task, uid: str = user_id) -> None:
+                if t.cancelled():
+                    return
+                exc = t.exception()
+                if exc is not None:
+                    logger.error(
+                        "recruiter: user=%s task crashed: %r", uid, exc, exc_info=exc
+                    )
+
+            handle.recruiter_task.add_done_callback(_on_recruiter_done)
             self._handles[user_id] = handle
             return handle
 
@@ -394,10 +425,17 @@ class WorkerRegistry:
             return False
         handle.state = "stopped"
         handle.task.cancel()
+        if handle.recruiter_task:
+            handle.recruiter_task.cancel()
         try:
             await handle.task
         except (asyncio.CancelledError, Exception):
             pass
+        if handle.recruiter_task:
+            try:
+                await handle.recruiter_task
+            except (asyncio.CancelledError, Exception):
+                pass
         drop_user_queue(user_id)
         try:
             await heartbeat(user_id, state="stopped", queued=0, next_run_at=None)
