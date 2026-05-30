@@ -6,8 +6,9 @@ import asyncio
 import logging
 import random
 
-from app.services import recruiter
+from app.services import chatik, recruiter
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
+from app.services.notifications import notify
 from app.worker import throttle
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,27 @@ async def _process_chat(user_id: str, agent, client, item: dict) -> None:
         if (item.get("state") or {}).get("id") == "discard":
             await recruiter.upsert_cursor(
                 user_id, nid, str(target["id"]), vacancy_id=vacancy_id, employer_name=employer_name
+            )
+            return
+        # Robot-recruiter quick-reply: the bot accepts only an exact button
+        # label (free text loops). The legacy API hides the buttons, so read
+        # them from chatik and answer with a verbatim label. None → live
+        # recruiter or no pending buttons → fall through to the free-text path.
+        buttons = await chatik.bot_buttons(user_id, nid)
+        if buttons is not None:
+            question, labels = buttons
+            sent = await agent.answer_recruiter_choice(nid, client, question, labels)
+            if not sent:
+                # could not map an answer to a single button — let the user tap.
+                await recruiter.insert_draft(
+                    user_id, nid, str(target["id"]),
+                    labels[0], "робот-рекрутёр: выбери вариант ответа",
+                    question_text=question,
+                )
+                await notify(user_id, "recruiter_draft", {"negotiation_id": nid})
+            await recruiter.upsert_cursor(
+                user_id, nid, str(target["id"]),
+                vacancy_id=vacancy_id, employer_name=employer_name,
             )
             return
         history = recruiter.to_lc_messages(items)

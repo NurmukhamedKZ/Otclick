@@ -58,6 +58,26 @@ def build_recruiter_prompt(resume_summary: str) -> str:
     return f"{RECRUITER_RULES}\n\nРезюме кандидата:\n{resume}\n"
 
 
+def build_recruiter_choice_prompt(
+    resume_summary: str, question: str, labels: list[str]
+) -> str:
+    """Pick one quick-reply button label for a robot-recruiter question.
+
+    The hh robot accepts an answer ONLY when it exactly matches a button label,
+    so the model must return one label verbatim — no rephrasing."""
+    opts = "\n".join(f"- {l}" for l in labels)
+    return (
+        "Робот-рекрутёр на hh.ru задал вопрос с готовыми вариантами ответа "
+        "(кнопками). Выбери ОДИН вариант от имени кандидата, правдиво и на "
+        "основе его резюме.\n"
+        f"Резюме кандидата:\n{resume_summary or '(нет данных)'}\n\n"
+        f"Вопрос: {question or '(см. варианты)'}\n"
+        f"Варианты ответа:\n{opts}\n\n"
+        "Верни ТОЛЬКО текст одного варианта, ДОСЛОВНО как в списке: без кавычек, "
+        "без пояснений, без изменений."
+    )
+
+
 # --- cover letter ------------------------------------------------------------
 
 COVER_LETTER_SYSTEM_PROMPT = (

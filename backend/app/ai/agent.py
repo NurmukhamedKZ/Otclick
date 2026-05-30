@@ -14,7 +14,9 @@ from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 
-from app.ai.prompts import build_recruiter_prompt
+import asyncio
+
+from app.ai.prompts import build_recruiter_choice_prompt, build_recruiter_prompt
 from app.ai.recruiter_tools import RECRUITER_TOOLS, RecruiterContext
 from app.config import settings
 from app.services.cover_letter import generate as _generate_cover_letter
@@ -164,3 +166,56 @@ class HHAgent:
             },
             context=ctx,
         )
+
+    async def answer_recruiter_choice(
+        self, negotiation_id: str, client, question: str, labels: list[str]
+    ) -> bool:
+        """Reply to a robot-recruiter quick-reply question with the EXACT button
+        label it expects (hh's bot loops on free-form prose). The label is picked
+        by the LLM grounded in the resume and sent verbatim via the legacy
+        messages API (those messages do reach the chatik chat).
+
+        Returns True if a label was sent, False if no label could be chosen
+        confidently (caller escalates to the user instead of guessing)."""
+        label = await self._choose_label(question, labels)
+        if label is None:
+            return False
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: client.post(
+                f"negotiations/{negotiation_id}/messages", {"message": label}
+            ),
+        )
+        logger.info(
+            "recruiter: answered bot buttons nid=%s label=%r", negotiation_id, label
+        )
+        return True
+
+    async def _choose_label(self, question: str, labels: list[str]) -> str | None:
+        """LLM picks one button label. Returns the verbatim label or None when
+        the answer does not map cleanly to a single option."""
+        if self.llm is None or not labels:
+            return None
+        summary = await self._load_resume_summary()
+        prompt = build_recruiter_choice_prompt(summary, question, labels)
+        try:
+            resp = await self.llm.ainvoke(prompt)
+        except Exception:
+            logger.warning("recruiter: choice LLM failed", exc_info=True)
+            return None
+        content = resp.content
+        if isinstance(content, list):  # some models return content parts
+            content = " ".join(str(c) for c in content)
+        text = (content or "").strip().strip('"').strip()
+        for l in labels:  # exact match (preferred — bot needs verbatim)
+            if text == l:
+                return l
+        for l in labels:  # tolerant: model added/dropped punctuation
+            if text.lower() == l.lower():
+                return l
+        for l in labels:  # model echoed the label inside a sentence
+            if l.lower() in text.lower():
+                return l
+        logger.warning("recruiter: choice %r not in labels %s", text, labels)
+        return None
