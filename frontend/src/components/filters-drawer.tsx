@@ -17,7 +17,7 @@ export function openFiltersDrawer() {
 }
 
 const AREAS = [
-  { value: "", label: "— регион —" },
+  { value: "", label: "любое" },
   { value: "40", label: "Казахстан" },
   { value: "113", label: "Россия" },
 ];
@@ -31,14 +31,14 @@ const EXPERIENCE = [
 ];
 
 const SCHEDULE = [
-  { value: "", label: "— график —" },
+  { value: "", label: "любое" },
   { value: "fullDay", label: "полный день" },
   { value: "remote", label: "удалённо" },
   { value: "flexible", label: "гибкий" },
   { value: "shift", label: "сменный" },
 ];
 
-type Tab = "filters" | "blacklist" | "ai";
+type Tab = "filters" | "blacklist";
 
 function filterTitle(f: Filter, resumes: Resume[] = []): string {
   if (f.name) return f.name;
@@ -198,7 +198,7 @@ export default function FiltersDrawer() {
             marginBottom: 18,
           }}
         >
-          {(["filters", "blacklist", "ai"] as const).map((id) => (
+          {(["filters", "blacklist"] as const).map((id) => (
             <button
               type="button"
               key={id}
@@ -214,7 +214,7 @@ export default function FiltersDrawer() {
                 cursor: "pointer",
               }}
             >
-              {id === "filters" ? "Фильтры" : id === "blacklist" ? "Чёрный список" : "AI-настройки"}
+              {id === "filters" ? "Фильтры" : "Чёрный список"}
             </button>
           ))}
         </div>
@@ -468,42 +468,6 @@ export default function FiltersDrawer() {
           </Card>
         )}
 
-        {tab === "ai" && (
-          <Card tone="light">
-            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>
-              AI-сопроводительное
-            </div>
-            <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 18 }}>
-              Шаблон применяется на бэкенде. Редактирование шаблона из UI — в разработке.
-            </div>
-            <textarea
-              disabled
-              defaultValue={`Здравствуйте!
-
-Меня заинтересовала вакансия {{vacancy}} в {{employer}}. У меня опыт в {{key_skills}}.
-
-Готов обсудить детали в удобное время.`}
-              style={{
-                width: "100%",
-                minHeight: 160,
-                padding: 16,
-                borderRadius: 14,
-                border: "1px solid var(--line)",
-                background: "var(--bg-deep)",
-                outline: "none",
-                fontFamily: "JetBrains Mono, monospace",
-                fontSize: 13,
-                lineHeight: 1.6,
-                resize: "vertical",
-                color: "var(--muted)",
-              }}
-            />
-            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 12 }}>
-              Скоро: редактирование из UI · OpenAI GPT-4o-mini
-            </div>
-          </Card>
-        )}
-
         <div
           style={{
             display: "flex",
@@ -538,13 +502,13 @@ function FilterEditor({
   onDelete: () => Promise<void>;
 }) {
   const [name, setName] = useState(filter.name ?? "");
+  const [editingName, setEditingName] = useState(false);
   const [text, setText] = useState(filter.text ?? "");
   const [salaryMin, setSalaryMin] = useState(filter.salary_min ? String(filter.salary_min) : "");
   const [area, setArea] = useState(filter.area ? String(filter.area) : "");
   const [schedule, setSchedule] = useState(filter.schedule ?? "");
   const [experience, setExperience] = useState(filter.experience ?? "");
   const [resumeId, setResumeId] = useState(filter.resume_id ?? "");
-  const [excludedRegex, setExcludedRegex] = useState(filter.excluded_regex ?? "");
 
   async function commit(patch: Partial<FilterCreate>) {
     try {
@@ -566,10 +530,61 @@ function FilterEditor({
           marginBottom: 16,
         }}
       >
-        <div>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>«{filterTitle(filter, resumes)}»</div>
-          <div style={{ fontSize: 12, color: "var(--muted)" }}>
-            редактировать параметры поиска
+        <div style={{ flex: 1, minWidth: 0, marginRight: 12 }}>
+          {editingName ? (
+            <input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={() => {
+                setEditingName(false);
+                if (name !== (filter.name ?? "")) commit({ name: name.trim() || null });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                if (e.key === "Escape") {
+                  setName(filter.name ?? "");
+                  setEditingName(false);
+                }
+              }}
+              placeholder={filterTitle(filter, resumes)}
+              style={{
+                ...inputStyle,
+                fontSize: 16,
+                fontWeight: 700,
+                padding: "6px 10px",
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setName(filter.name ?? "");
+                setEditingName(true);
+              }}
+              title="Нажми, чтобы переименовать"
+              style={{
+                border: "none",
+                background: "transparent",
+                padding: 0,
+                fontSize: 16,
+                fontWeight: 700,
+                color: "var(--ink)",
+                cursor: "text",
+                fontFamily: "inherit",
+                textAlign: "left",
+                maxWidth: "100%",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                display: "block",
+              }}
+            >
+              «{filterTitle(filter, resumes)}»
+            </button>
+          )}
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+            нажми на название, чтобы переименовать
           </div>
         </div>
         <Btn kind="ghost" size="sm" icon={<ITrash size={13} />} onClick={onDelete}>
@@ -577,18 +592,8 @@ function FilterEditor({
         </Btn>
       </div>
 
-      <EditorField label="название фильтра">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={() => name !== (filter.name ?? "") && commit({ name: name.trim() || null })}
-          placeholder="напр. Python-разработчик, Москва"
-          style={inputStyle}
-        />
-      </EditorField>
-
       <EditorField
-        label="ключевые слова"
+        label="позиция"
         hint="Короткий запрос = больше вакансий. Лучше 1-2 слова (название должности). Список через запятую сужает выдачу почти до нуля."
       >
         <input
@@ -601,7 +606,7 @@ function FilterEditor({
       </EditorField>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))", gap: 14 }}>
-        <EditorField label="зарплата от">
+        <EditorField label="зарплата от" hint="можно оставить пустым — без ограничения">
           <input
             type="number"
             min={0}
@@ -611,7 +616,7 @@ function FilterEditor({
               salaryMin !== (filter.salary_min ? String(filter.salary_min) : "") &&
               commit({ salary_min: salaryMin ? Number(salaryMin) : null })
             }
-            placeholder="например 250000"
+            placeholder="любая"
             style={inputStyle}
           />
         </EditorField>
@@ -707,19 +712,6 @@ function FilterEditor({
           ))}
         </div>
       </div>
-
-      <EditorField label="excluded regex (опц.)">
-        <input
-          value={excludedRegex}
-          onChange={(e) => setExcludedRegex(e.target.value)}
-          onBlur={() =>
-            excludedRegex !== (filter.excluded_regex ?? "") &&
-            commit({ excluded_regex: excludedRegex || null })
-          }
-          placeholder="например (junior|стажёр)"
-          style={inputStyle}
-        />
-      </EditorField>
 
       <div
         style={{
