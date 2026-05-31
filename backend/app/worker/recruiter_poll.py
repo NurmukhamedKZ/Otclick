@@ -19,6 +19,46 @@ from app.worker import throttle
 logger = logging.getLogger(__name__)
 _rng = random.Random()
 
+# Negotiation states where the chat is closed / read-only: a reply can't be sent
+# and there is nothing for the agent to do. Skip these before running the LLM
+# (the agent would otherwise waste tokens "handling" a rejection). Mirrors the
+# /chats UI READONLY_STATES — the rejection signal lives on the negotiation
+# state.id (legacy negotiations API), NOT in the chat messages.
+SKIP_STATES = frozenset({
+    "discard", "discard_by_employer", "discard_after_interview",
+    "discard_by_applicant", "discard_visited", "discard_no_appearance",
+    "discard_to_other_vacancy", "hidden", "archive",
+})
+_MAX_NEG_PAGES = 15
+
+
+async def _negotiation_states(client) -> dict[str, str]:
+    """nid -> state.id from the legacy negotiations list (same source the /chats
+    UI uses for the «Отказ» tag). Best-effort: returns {} on any failure so the
+    poll stays fail-open (a fetch error must not stop the agent from replying)."""
+    loop = asyncio.get_running_loop()
+    out: dict[str, str] = {}
+    try:
+        page = 0
+        while page < _MAX_NEG_PAGES:
+            data = await loop.run_in_executor(
+                None,
+                lambda p=page: client.get(
+                    "negotiations", order_by="updated_at", page=p, per_page=100
+                ),
+            )
+            for it in data.get("items", []):
+                sid = (it.get("state") or {}).get("id")
+                if sid:
+                    out[str(it.get("id"))] = str(sid)
+            if page + 1 >= int(data.get("pages", 1)):
+                break
+            page += 1
+    except Exception:
+        logger.warning("recruiter poll: negotiation-state fetch failed", exc_info=True)
+        return {}
+    return out
+
 
 async def poll_recruiter_chats(user_id: str, agent) -> None:
     """For each recent chat whose newest message is an unhandled employer/bot
@@ -34,9 +74,10 @@ async def poll_recruiter_chats(user_id: str, agent) -> None:
         return
     original = client.access_token
     try:
+        states = await _negotiation_states(client)
         for ref in chats:
             try:
-                handled = await _process_chat(user_id, agent, client, ref)
+                handled = await _process_chat(user_id, agent, client, ref, states)
             except Exception:
                 # Do NOT advance the cursor — retry on the next poll.
                 logger.warning(
@@ -60,11 +101,14 @@ def _history(msgs: list[dict]) -> list[tuple[str, str]]:
     return out
 
 
-async def _process_chat(user_id: str, agent, client, ref: dict) -> bool:
+async def _process_chat(user_id: str, agent, client, ref: dict, states: dict[str, str]) -> bool:
     """Returns True when the agent acted (so the caller throttles before the next
     chat). Cursor (`last_handled_message_id`) is the dedup key — only the newest
     employer message, when unhandled, triggers a reply."""
     nid = ref["nid"]
+    # Rejected / closed negotiation (отказ, archived, …) → don't run the agent.
+    if states.get(nid) in SKIP_STATES:
+        return False
     last_id = ref.get("last_id")
     if last_id is None:
         return False

@@ -101,6 +101,27 @@ async def test_poll_skips_bot_message_without_buttons_but_advances():
 
 
 @pytest.mark.asyncio
+async def test_poll_skips_rejected_negotiation_state():
+    # Negotiation in a discard ("отказ") state → agent never runs (no tokens),
+    # no chatik message fetch, cursor untouched.
+    from app.worker import recruiter_poll as rp
+    recent = [_ref(last_id="m5", last_participant_id="emp")]
+    fetch = AsyncMock()
+    agent = MagicMock(); agent.answer_recruiter = AsyncMock()
+    agent.answer_recruiter_choice = AsyncMock()
+    p = _patches(rp, recent=recent, messages=[], cursor="old")
+    p[3] = patch.object(rp.chatik, "chat_messages", new=fetch)  # spy
+    upsert = p[5]
+    with patch.object(rp, "_negotiation_states",
+                      new=AsyncMock(return_value={"n9": "discard_after_interview"})):
+        await _run(rp, agent, p)
+    fetch.assert_not_awaited()
+    agent.answer_recruiter.assert_not_awaited()
+    agent.answer_recruiter_choice.assert_not_awaited()
+    upsert.new.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_poll_skips_when_last_message_is_mine():
     from app.worker import recruiter_poll as rp
     recent = [_ref(last_participant_id="me")]  # == applicant_id
