@@ -67,6 +67,7 @@ export type BlacklistCreate = {
 
 export type WorkerStatus = {
   state: "running" | "paused_captcha" | "paused_limit" | "stopped";
+  agent_state: "running" | "stopped";
   today_count: number;
   daily_limit: number;
   queued: number;
@@ -81,6 +82,14 @@ export type WorkerStartResponse = {
 };
 
 export type WorkerStopResponse = {
+  stopped: boolean;
+};
+
+export type AgentStartResponse = {
+  agent_state: string;
+};
+
+export type AgentStopResponse = {
   stopped: boolean;
 };
 

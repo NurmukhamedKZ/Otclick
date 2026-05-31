@@ -57,6 +57,7 @@ class RunnerHandle:
     task: asyncio.Task | None = None
     recruiter_task: asyncio.Task | None = None
     captcha_event: asyncio.Event = field(default_factory=asyncio.Event)
+    agent_stop: asyncio.Event = field(default_factory=asyncio.Event)
     cluster: throttle.SessionCluster = field(default_factory=throttle.SessionCluster)
     agent: HHAgent | None = None
     last_error: str | None = None
@@ -354,21 +355,88 @@ async def _run_loop(handle: RunnerHandle) -> None:
 
 
 async def _recruiter_loop(handle: RunnerHandle) -> None:
-    """Answer recruiter chats on a fixed cadence, independent of apply limits.
+    """Answer recruiter chats on a fixed cadence, independent of the apply loop.
 
-    Runs as its own task so daily/hourly apply caps (which block the apply loop
-    with a long sleep) and empty-queue idle never stop recruiter replies.
-    Exits when the apply loop marks the handle stopped (token_dead / banned).
+    Runs as its own task with its own on/off signal (`agent_stop`), so the AI
+    agent can run with auto-apply off (and vice versa). Daily/hourly apply caps
+    and empty-queue idle never stop recruiter replies.
     """
     user_id = handle.user_id
     logger.info("recruiter loop: user=%s START", user_id)
-    while handle.state != "stopped":
+    while not handle.agent_stop.is_set():
         try:
             await poll_recruiter_chats(user_id, handle.agent)
         except Exception:
             logger.exception("recruiter poll failed for %s", user_id)
-        await asyncio.sleep(RECRUITER_POLL_INTERVAL_S)
+        try:
+            await asyncio.wait_for(
+                handle.agent_stop.wait(), timeout=RECRUITER_POLL_INTERVAL_S
+            )
+        except asyncio.TimeoutError:
+            pass
     logger.info("recruiter loop: user=%s STOP", user_id)
+
+
+def _spawn_apply(handle: RunnerHandle) -> None:
+    user_id = handle.user_id
+    logger.info("registry: spawning apply runner for user=%s", user_id)
+    handle.state = "running"
+    handle.task = asyncio.create_task(_run_loop(handle), name=f"worker:{user_id}")
+
+    def _on_done(t: asyncio.Task, uid: str = user_id) -> None:
+        if t.cancelled():
+            logger.info("runner: user=%s task cancelled", uid)
+            return
+        exc = t.exception()
+        if exc is not None:
+            logger.error("runner: user=%s task crashed: %r", uid, exc, exc_info=exc)
+        else:
+            logger.info("runner: user=%s task ended cleanly", uid)
+
+    handle.task.add_done_callback(_on_done)
+
+
+def _spawn_agent(handle: RunnerHandle) -> None:
+    user_id = handle.user_id
+    logger.info("registry: spawning recruiter agent for user=%s", user_id)
+    handle.agent_stop.clear()
+    handle.recruiter_task = asyncio.create_task(
+        _recruiter_loop(handle), name=f"recruiter:{user_id}"
+    )
+
+    def _on_recruiter_done(t: asyncio.Task, uid: str = user_id) -> None:
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc is not None:
+            logger.error("recruiter: user=%s task crashed: %r", uid, exc, exc_info=exc)
+
+    handle.recruiter_task.add_done_callback(_on_recruiter_done)
+
+
+async def _cancel_apply(handle: RunnerHandle) -> None:
+    handle.state = "stopped"
+    task = handle.task
+    handle.task = None
+    if task:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+    drop_user_queue(handle.user_id)
+
+
+async def _cancel_agent(handle: RunnerHandle) -> None:
+    handle.agent_stop.set()
+    task = handle.recruiter_task
+    handle.recruiter_task = None
+    if task:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 class WorkerRegistry:
@@ -376,66 +444,64 @@ class WorkerRegistry:
         self._handles: dict[str, RunnerHandle] = {}
         self._lock = asyncio.Lock()
 
-    async def start(self, user_id: str) -> RunnerHandle:
+    async def reconcile(
+        self, user_id: str, want_apply: bool, want_agent: bool
+    ) -> RunnerHandle | None:
+        """Start/stop the apply loop and recruiter loop independently."""
         async with self._lock:
-            existing = self._handles.get(user_id)
-            if existing and existing.task and not existing.task.done():
-                logger.info("registry: user=%s already running — returning existing", user_id)
-                return existing
-            logger.info("registry: spawning runner for user=%s", user_id)
-            handle = RunnerHandle(user_id=user_id)
-            handle.task = asyncio.create_task(
-                _run_loop(handle), name=f"worker:{user_id}"
+            handle = self._handles.get(user_id)
+            apply_live = bool(handle and handle.task and not handle.task.done())
+            agent_live = bool(
+                handle and handle.recruiter_task and not handle.recruiter_task.done()
             )
 
-            def _on_done(t: asyncio.Task, uid: str = user_id) -> None:
-                if t.cancelled():
-                    logger.info("runner: user=%s task cancelled", uid)
-                    return
-                exc = t.exception()
-                if exc is not None:
-                    logger.error("runner: user=%s task crashed: %r", uid, exc, exc_info=exc)
-                else:
-                    logger.info("runner: user=%s task ended cleanly", uid)
+            if not want_apply and not want_agent:
+                if handle:
+                    await _cancel_apply(handle)
+                    await _cancel_agent(handle)
+                    self._handles.pop(user_id, None)
+                    try:
+                        await heartbeat(
+                            user_id, state="stopped", queued=0, next_run_at=None
+                        )
+                    except Exception:
+                        logger.warning(
+                            "worker_runtime stop heartbeat failed for %s",
+                            user_id,
+                            exc_info=True,
+                        )
+                return None
 
-            handle.task.add_done_callback(_on_done)
+            if handle is None:
+                handle = RunnerHandle(user_id=user_id)
+                self._handles[user_id] = handle
 
-            handle.recruiter_task = asyncio.create_task(
-                _recruiter_loop(handle), name=f"recruiter:{user_id}"
-            )
+            if want_apply and not apply_live:
+                _spawn_apply(handle)
+            elif not want_apply and apply_live:
+                await _cancel_apply(handle)
 
-            def _on_recruiter_done(t: asyncio.Task, uid: str = user_id) -> None:
-                if t.cancelled():
-                    return
-                exc = t.exception()
-                if exc is not None:
-                    logger.error(
-                        "recruiter: user=%s task crashed: %r", uid, exc, exc_info=exc
-                    )
+            if want_agent and not agent_live:
+                _spawn_agent(handle)
+            elif not want_agent and agent_live:
+                await _cancel_agent(handle)
 
-            handle.recruiter_task.add_done_callback(_on_recruiter_done)
-            self._handles[user_id] = handle
             return handle
+
+    async def start(self, user_id: str) -> RunnerHandle:
+        """Legacy: start both loops (apply + recruiter agent)."""
+        handle = await self.reconcile(user_id, True, True)
+        assert handle is not None
+        return handle
 
     async def stop(self, user_id: str) -> bool:
         async with self._lock:
             handle = self._handles.pop(user_id, None)
-        if not handle or not handle.task:
+        if not handle:
             drop_user_queue(user_id)
             return False
-        handle.state = "stopped"
-        handle.task.cancel()
-        if handle.recruiter_task:
-            handle.recruiter_task.cancel()
-        try:
-            await handle.task
-        except (asyncio.CancelledError, Exception):
-            pass
-        if handle.recruiter_task:
-            try:
-                await handle.recruiter_task
-            except (asyncio.CancelledError, Exception):
-                pass
+        await _cancel_apply(handle)
+        await _cancel_agent(handle)
         drop_user_queue(user_id)
         try:
             await heartbeat(user_id, state="stopped", queued=0, next_run_at=None)
@@ -450,12 +516,22 @@ class WorkerRegistry:
         return handle
 
     def running_user_ids(self) -> list[str]:
-        """Users with a live (not-done) runner task — for worker_main reconcile."""
+        """Users with a live (not-done) apply task — for worker_main reconcile."""
         return [
             uid
             for uid, h in self._handles.items()
             if h.task is not None and not h.task.done()
         ]
+
+    def active_user_ids(self) -> list[str]:
+        """Users with any live loop (apply or recruiter agent)."""
+        out: list[str] = []
+        for uid, h in self._handles.items():
+            apply_live = h.task is not None and not h.task.done()
+            agent_live = h.recruiter_task is not None and not h.recruiter_task.done()
+            if apply_live or agent_live:
+                out.append(uid)
+        return out
 
     def resume_captcha(self, user_id: str) -> bool:
         handle = self._handles.get(user_id)

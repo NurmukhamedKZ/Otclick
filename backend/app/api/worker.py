@@ -20,8 +20,17 @@ class StopResponse(BaseModel):
     stopped: bool
 
 
+class AgentStartResponse(BaseModel):
+    agent_state: str
+
+
+class AgentStopResponse(BaseModel):
+    stopped: bool
+
+
 class StatusResponse(BaseModel):
     state: str
+    agent_state: str
     today_count: int
     daily_limit: int
     queued: int
@@ -45,6 +54,20 @@ async def stop_worker(user_id: str = Depends(get_current_user)) -> StopResponse:
     return StopResponse(stopped=True)
 
 
+@router.post("/agent/start", response_model=AgentStartResponse)
+async def start_agent(
+    user_id: str = Depends(require_active_plan),
+) -> AgentStartResponse:
+    await worker_control.set_agent_enabled(user_id, True)
+    return AgentStartResponse(agent_state="running")
+
+
+@router.post("/agent/stop", response_model=AgentStopResponse)
+async def stop_agent(user_id: str = Depends(get_current_user)) -> AgentStopResponse:
+    await worker_control.set_agent_enabled(user_id, False)
+    return AgentStopResponse(stopped=True)
+
+
 @router.get("/status", response_model=StatusResponse)
 async def worker_status(user_id: str = Depends(get_current_user)) -> StatusResponse:
     import asyncio
@@ -58,9 +81,10 @@ async def worker_status(user_id: str = Depends(get_current_user)) -> StatusRespo
         tz = _tz_for_user(user_id)
         return _read_day_count(user_id, _today_local(tz))
 
-    db_today, enabled, rt = await asyncio.gather(
+    db_today, enabled, agent_enabled, rt = await asyncio.gather(
         loop.run_in_executor(None, _today_count_db),
         worker_control.is_enabled(user_id),
+        worker_control.is_agent_enabled(user_id),
         worker_runtime.get(user_id),
     )
 
@@ -71,12 +95,15 @@ async def worker_status(user_id: str = Depends(get_current_user)) -> StatusRespo
     else:
         state = "stopped"
 
+    agent_state = "running" if agent_enabled else "stopped"
+
     queued = int((rt or {}).get("queued") or 0) if enabled else 0
     next_run_at = (rt or {}).get("next_run_at") if enabled else None
     last_error = (rt or {}).get("last_error") if enabled else None
 
     return StatusResponse(
         state=state,
+        agent_state=agent_state,
         today_count=db_today,
         daily_limit=DAILY_LIMIT,
         queued=queued,

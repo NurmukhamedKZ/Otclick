@@ -114,6 +114,47 @@ async def test_registry_start_stop_lifecycle():
         assert registry.get("u1") is None
 
 
+async def test_registry_reconcile_independent_loops():
+    import asyncio
+
+    from app.worker import runner
+
+    runner.reset_registry()
+    registry = runner.get_registry()
+
+    async def idle_loop(handle):
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            raise
+
+    with (
+        patch.object(runner, "_run_loop", side_effect=idle_loop),
+        patch.object(runner, "_recruiter_loop", side_effect=idle_loop),
+    ):
+        # agent only — no apply task
+        h = await registry.reconcile("u1", False, True)
+        assert h.task is None
+        assert h.recruiter_task is not None and not h.recruiter_task.done()
+
+        # add apply, keep agent — same handle
+        h2 = await registry.reconcile("u1", True, True)
+        assert h2 is h
+        assert h.task is not None and not h.task.done()
+        assert h.recruiter_task is not None and not h.recruiter_task.done()
+        assert registry.active_user_ids() == ["u1"]
+
+        # drop apply, keep agent
+        await registry.reconcile("u1", False, True)
+        assert h.task is None
+        assert h.recruiter_task is not None and not h.recruiter_task.done()
+
+        # drop everything → handle gone
+        await registry.reconcile("u1", False, False)
+        assert registry.get("u1") is None
+        assert registry.active_user_ids() == []
+
+
 async def test_registry_resume_captcha():
     from app.worker import runner
 

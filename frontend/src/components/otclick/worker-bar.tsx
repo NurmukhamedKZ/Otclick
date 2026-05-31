@@ -5,12 +5,14 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import type {
+  AgentStartResponse,
+  AgentStopResponse,
   WorkerStartResponse,
   WorkerStatus,
   WorkerStopResponse,
 } from "@/lib/types";
 import { StatusDot } from "@/components/otclick/ui";
-import { IBolt, IFilter, IPause, IPlay, IRefresh } from "@/components/otclick/icons";
+import { IBolt, IFilter, IPause, IPlay, IRefresh, ISpark } from "@/components/otclick/icons";
 import { pushToast } from "@/components/toaster";
 import { openFiltersDrawer } from "@/components/filters-drawer";
 
@@ -61,6 +63,26 @@ export default function WorkerBar() {
     onError: (e) => pushToast({ kind: "error", title: e instanceof Error ? e.message : "stop failed" }),
   });
 
+  const agentStartM = useMutation({
+    mutationFn: () =>
+      apiFetch<AgentStartResponse>("/api/worker/agent/start", { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["worker-status"] });
+      pushToast({ kind: "success", title: "ИИ-агент запущен" });
+    },
+    onError: (e) => pushToast({ kind: "error", title: e instanceof Error ? e.message : "start failed" }),
+  });
+
+  const agentStopM = useMutation({
+    mutationFn: () =>
+      apiFetch<AgentStopResponse>("/api/worker/agent/stop", { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["worker-status"] });
+      pushToast({ kind: "info", title: "ИИ-агент остановлен" });
+    },
+    onError: (e) => pushToast({ kind: "error", title: e instanceof Error ? e.message : "stop failed" }),
+  });
+
   const refresh = useCallback(async () => {
     setRefreshing(true);
     await qc.invalidateQueries({ queryKey: ["worker-status"] });
@@ -84,6 +106,8 @@ export default function WorkerBar() {
   const dot = isErr ? "err" : isRunning ? "ok" : state === "paused_captcha" || state === "paused_limit" ? "warn" : "muted";
   const label = STATE_LABEL[state];
   const busy = startM.isPending || stopM.isPending;
+  const agentRunning = (status?.agent_state ?? "stopped") === "running";
+  const agentBusy = agentStartM.isPending || agentStopM.isPending;
 
   return (
     <div
@@ -115,7 +139,14 @@ export default function WorkerBar() {
             />
           )}
         </span>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>worker · {label}</span>
+        <span style={{ fontWeight: 600, fontSize: 14 }}>автоотклик · {label}</span>
+      </div>
+      <div style={{ height: 18, width: 1, background: "#ffffff15" }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <StatusDot tone={agentRunning ? "ok" : "muted"} size={9} />
+        <span style={{ fontWeight: 600, fontSize: 14 }}>
+          ИИ-агент · {agentRunning ? "работает" : "остановлен"}
+        </span>
       </div>
       <div style={{ height: 18, width: 1, background: "#ffffff15" }} />
       <div style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 13 }}>
@@ -191,6 +222,35 @@ export default function WorkerBar() {
       </Link>
       <button
         type="button"
+        disabled={agentBusy}
+        onClick={() => (agentRunning ? agentStopM.mutate() : agentStartM.mutate())}
+        style={{
+          border: agentRunning ? "none" : "1px solid var(--yellow)",
+          background: agentRunning ? "#ffffff15" : "transparent",
+          color: agentRunning ? "#F5F1E6" : "var(--yellow)",
+          borderRadius: 999,
+          padding: "8px 14px",
+          fontWeight: 600,
+          fontSize: 13,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          cursor: agentBusy ? "not-allowed" : "pointer",
+          opacity: agentBusy ? 0.6 : 1,
+        }}
+      >
+        {agentRunning ? (
+          <>
+            <IPause size={14} /> агент
+          </>
+        ) : (
+          <>
+            <ISpark size={14} /> ИИ-агент
+          </>
+        )}
+      </button>
+      <button
+        type="button"
         disabled={busy}
         onClick={() => (isRunning ? stopM.mutate() : startM.mutate())}
         style={{
@@ -210,11 +270,11 @@ export default function WorkerBar() {
       >
         {isRunning ? (
           <>
-            <IPause size={14} /> остановить
+            <IPause size={14} /> автоотклик
           </>
         ) : (
           <>
-            <IPlay size={14} /> запустить
+            <IPlay size={14} /> автоотклик
           </>
         )}
       </button>

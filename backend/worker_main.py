@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app.services.plan import filter_accessible
-from app.services.worker_control import enabled_active_user_ids
+from app.services.worker_control import active_user_flags
 from app.worker.runner import get_registry
 
 logging.basicConfig(
@@ -31,17 +31,25 @@ POLL_INTERVAL_S = 15
 
 async def _reconcile(registry) -> None:
     loop = asyncio.get_running_loop()
-    users = await loop.run_in_executor(None, enabled_active_user_ids)
-    users = await loop.run_in_executor(None, filter_accessible, users)
-    desired = set(users)
-    running = set(registry.running_user_ids())
+    flags = await loop.run_in_executor(None, active_user_flags)
+    accessible = set(
+        await loop.run_in_executor(None, filter_accessible, list(flags.keys()))
+    )
 
-    for user_id in desired - running:
-        logger.info("reconcile: starting runner for user=%s", user_id)
-        await registry.start(user_id)
-    for user_id in running - desired:
-        logger.info("reconcile: stopping runner for user=%s", user_id)
-        await registry.stop(user_id)
+    # Plan gate both loops; a user without a valid plan gets neither.
+    desired: dict[str, tuple[bool, bool]] = {}
+    for uid, (apply_on, agent_on) in flags.items():
+        ok = uid in accessible
+        desired[uid] = (apply_on and ok, agent_on and ok)
+    # Users with a live loop but no longer desired → reconcile to (False, False).
+    for uid in registry.active_user_ids():
+        desired.setdefault(uid, (False, False))
+
+    for uid, (apply_on, agent_on) in desired.items():
+        logger.info(
+            "reconcile: user=%s apply=%s agent=%s", uid, apply_on, agent_on
+        )
+        await registry.reconcile(uid, apply_on, agent_on)
 
 
 async def main() -> None:
