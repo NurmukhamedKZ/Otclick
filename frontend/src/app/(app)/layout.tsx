@@ -5,6 +5,7 @@ import Sidebar from "@/components/otclick/sidebar";
 import WorkerBar from "@/components/otclick/worker-bar";
 import FiltersDrawer from "@/components/filters-drawer";
 import CaptchaModal from "@/components/captcha-modal";
+import OnboardingModal from "@/components/otclick/onboarding-modal";
 import Toaster from "@/components/toaster";
 import RealtimeBridge from "@/app/(app)/dashboard/realtime-bridge";
 
@@ -39,6 +40,7 @@ export default async function AppLayout({
         </main>
         <FiltersDrawer />
         <CaptchaModal />
+        <OnboardingModal />
         <RealtimeBridge />
         <Toaster />
       </div>
