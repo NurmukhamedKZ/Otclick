@@ -98,10 +98,142 @@ async def _relevant_ids(
     return {vid for vid in ids if verdicts.get(vid, (True, ""))[0]}
 
 
-async def produce_jobs(user_id: str, agent=None) -> tuple[int, int]:
-    """Refill user queue from enabled filters.
+async def _filter_candidate_stream(loop, agent, client, user_id: str, f: dict):
+    """Yield vacancy ids for one filter, lazily paged.
 
-    Returns (pushed, skipped_has_test_total) across all filters in this run.
+    Applies dedup / blacklist / excluded_regex / AI relevance per page, then
+    yields surviving candidate ids one at a time so the caller can round-robin
+    across filters. On completion (incl. early aclose) flushes the
+    relations-based auto-blacklist and logs a per-filter summary.
+    """
+    excluded_pat: re.Pattern | None = None
+    if f.get("excluded_regex"):
+        try:
+            excluded_pat = re.compile(f["excluded_regex"], re.IGNORECASE)
+        except re.error:
+            logger.warning("invalid excluded_regex on filter %s", f.get("id"))
+
+    skipped_already = 0
+    skipped_blacklist = 0
+    skipped_excluded = 0
+    skipped_relations = 0
+    relations_blacklist: dict[str, str | None] = {}
+    pages = 0
+
+    try:
+        for page in range(MAX_PAGES_PER_FILTER):
+            params = _filter_to_search_params(f)
+            params["per_page"] = PER_PAGE
+            params["page"] = page
+            logger.info(
+                "producer: user=%s filter=%s search params=%s",
+                user_id, f.get("id"), params,
+            )
+            try:
+                payload = await loop.run_in_executor(
+                    None, lambda p=params: client.get("vacancies", p)
+                )
+            except Exception:
+                logger.exception("vacancy search failed for filter %s", f.get("id"))
+                break
+
+            items = payload.get("items", []) if isinstance(payload, dict) else []
+            total_found = payload.get("found") if isinstance(payload, dict) else None
+            pages_total = payload.get("pages") if isinstance(payload, dict) else None
+            logger.info(
+                "producer: user=%s filter=%s page=%d items=%d found=%s pages=%s",
+                user_id, f.get("id"), page, len(items), total_found, pages_total,
+            )
+            if not items:
+                break
+
+            vacancy_ids = [str(it["id"]) for it in items if it.get("id")]
+            employer_ids = [
+                str((it.get("employer") or {}).get("id"))
+                for it in items
+                if (it.get("employer") or {}).get("id")
+            ]
+            already = await loop.run_in_executor(
+                None, _existing_vacancy_ids, user_id, vacancy_ids
+            )
+            blacklisted = await loop.run_in_executor(
+                None, _blacklisted_employer_ids, user_id, employer_ids
+            )
+
+            page_candidates: list[dict] = []
+            for it in items:
+                vid = str(it.get("id") or "")
+                if not vid or vid in already:
+                    skipped_already += 1
+                    continue
+                # Non-empty relations = already interacted with this vacancy
+                # (responded / invited / rejected) → skip + blacklist employer
+                # so we never re-apply to the same company.
+                if it.get("relations"):
+                    skipped_relations += 1
+                    emp = it.get("employer") or {}
+                    if emp.get("id"):
+                        relations_blacklist[str(emp["id"])] = emp.get("name")
+                    continue
+                # has_test vacancies are NOT skipped — they fall through to the
+                # queue and apply_one solves the test via the web session
+                # (form_filler). It records form_sent on success, form_required
+                # on failure, without burning an API apply attempt.
+                emp_id = (it.get("employer") or {}).get("id")
+                if emp_id and str(emp_id) in blacklisted:
+                    skipped_blacklist += 1
+                    continue
+                if _matches_excluded(it, excluded_pat):
+                    skipped_excluded += 1
+                    continue
+                snippet = it.get("snippet") or {}
+                page_candidates.append({
+                    "id": vid,
+                    "name": it.get("name") or "",
+                    "snippet_requirement": snippet.get("requirement") or "",
+                    "snippet_responsibility": snippet.get("responsibility") or "",
+                })
+
+            if f.get("ai_filter_enabled") and page_candidates:
+                keep = await _relevant_ids(
+                    loop, agent, user_id, f["resume_id"], page_candidates
+                )
+                dropped = len(page_candidates) - len(keep)
+                if dropped:
+                    logger.info(
+                        "producer: user=%s filter=%s relevance dropped %d/%d",
+                        user_id, f.get("id"), dropped, len(page_candidates),
+                    )
+                page_candidates = [c for c in page_candidates if c["id"] in keep]
+
+            pages += 1
+            for c in page_candidates:
+                yield c["id"]
+
+            if pages_total is not None and page + 1 >= pages_total:
+                break
+            if len(items) < PER_PAGE:
+                break
+    finally:
+        if relations_blacklist:
+            await loop.run_in_executor(
+                None, bulk_auto_blacklist, user_id, relations_blacklist
+            )
+        logger.info(
+            "producer: user=%s filter=%s pages=%d skipped already=%d blacklist=%d "
+            "excluded=%d relations=%d",
+            user_id, f.get("id"), pages,
+            skipped_already, skipped_blacklist, skipped_excluded, skipped_relations,
+        )
+
+
+async def produce_jobs(user_id: str, agent=None) -> tuple[int, int]:
+    """Refill user queue from enabled filters, round-robin across filters.
+
+    Each filter gets an equal turn (one candidate per turn) so no single
+    filter can starve the others out of the shared MAX_PUSH_PER_RUN budget.
+    Returns (pushed, skipped_has_test_total) — the second value is always 0
+    (has_test vacancies are queued, not skipped); kept for the caller's API.
     """
     loop = asyncio.get_running_loop()
     logger.info("producer: starting for user=%s", user_id)
@@ -124,162 +256,36 @@ async def produce_jobs(user_id: str, agent=None) -> tuple[int, int]:
     original_access = client.access_token
     queue = get_user_queue(user_id)
     pushed = 0
-    skipped_has_test_total = 0
+
+    streams = [_filter_candidate_stream(loop, agent, client, user_id, f) for f in filters]
+    meta = [(f["resume_id"], f.get("id")) for f in filters]
+    active = list(range(len(streams)))
+    cursor = 0
 
     try:
-        for f in filters:
-            if pushed >= MAX_PUSH_PER_RUN:
-                break
-
-            excluded_pat: re.Pattern | None = None
-            if f.get("excluded_regex"):
-                try:
-                    excluded_pat = re.compile(f["excluded_regex"], re.IGNORECASE)
-                except re.error:
-                    logger.warning("invalid excluded_regex on filter %s", f.get("id"))
-
-            skipped_already = 0
-            skipped_blacklist = 0
-            skipped_excluded = 0
-            skipped_has_test = 0
-            skipped_relations = 0
-            relations_blacklist: dict[str, str | None] = {}
-            pages = 0
-            total_found: int | None = None
-
-            for page in range(MAX_PAGES_PER_FILTER):
-                if pushed >= MAX_PUSH_PER_RUN:
-                    break
-                params = _filter_to_search_params(f)
-                params["per_page"] = PER_PAGE
-                params["page"] = page
-                logger.info(
-                    "producer: user=%s filter=%s search params=%s",
-                    user_id,
-                    f.get("id"),
-                    params,
+        while pushed < MAX_PUSH_PER_RUN and active:
+            idx = active[cursor % len(active)]
+            try:
+                vid = await streams[idx].__anext__()
+            except StopAsyncIteration:
+                active.remove(idx)
+                continue  # list shrank — keep cursor, next turn picks the shifted item
+            resume_id, filter_id = meta[idx]
+            await queue.put(
+                ApplyJob(
+                    user_id=user_id,
+                    resume_id=resume_id,
+                    vacancy_id=vid,
+                    filter_id=filter_id,
                 )
-                try:
-                    payload = await loop.run_in_executor(
-                        None, lambda p=params: client.get("vacancies", p)
-                    )
-                except Exception:
-                    logger.exception("vacancy search failed for filter %s", f.get("id"))
-                    break
-
-                items = payload.get("items", []) if isinstance(payload, dict) else []
-                total_found = payload.get("found") if isinstance(payload, dict) else None
-                pages_total = payload.get("pages") if isinstance(payload, dict) else None
-                logger.info(
-                    "producer: user=%s filter=%s page=%d items=%d found=%s pages=%s",
-                    user_id,
-                    f.get("id"),
-                    page,
-                    len(items),
-                    total_found,
-                    pages_total,
-                )
-                if not items:
-                    break
-
-                vacancy_ids = [str(it["id"]) for it in items if it.get("id")]
-                employer_ids = [
-                    str((it.get("employer") or {}).get("id"))
-                    for it in items
-                    if (it.get("employer") or {}).get("id")
-                ]
-                already = await loop.run_in_executor(
-                    None, _existing_vacancy_ids, user_id, vacancy_ids
-                )
-                blacklisted = await loop.run_in_executor(
-                    None, _blacklisted_employer_ids, user_id, employer_ids
-                )
-
-                page_candidates: list[dict] = []
-                for it in items:
-                    vid = str(it.get("id") or "")
-                    if not vid or vid in already:
-                        skipped_already += 1
-                        continue
-                    # Non-empty relations = already interacted with this vacancy
-                    # (responded / invited / rejected) → skip + blacklist employer
-                    # so we never re-apply to the same company.
-                    if it.get("relations"):
-                        skipped_relations += 1
-                        emp = it.get("employer") or {}
-                        if emp.get("id"):
-                            relations_blacklist[str(emp["id"])] = emp.get("name")
-                        continue
-                    # has_test vacancies are NOT skipped — they fall through to the
-                    # queue and apply_one solves the test via the web session
-                    # (form_filler). It records form_sent on success, form_required
-                    # on failure, without burning an API apply attempt.
-                    emp_id = (it.get("employer") or {}).get("id")
-                    if emp_id and str(emp_id) in blacklisted:
-                        skipped_blacklist += 1
-                        continue
-                    if _matches_excluded(it, excluded_pat):
-                        skipped_excluded += 1
-                        continue
-                    snippet = it.get("snippet") or {}
-                    page_candidates.append({
-                        "id": vid,
-                        "name": it.get("name") or "",
-                        "snippet_requirement": snippet.get("requirement") or "",
-                        "snippet_responsibility": snippet.get("responsibility") or "",
-                    })
-
-                if f.get("ai_filter_enabled") and page_candidates:
-                    keep = await _relevant_ids(
-                        loop, agent, user_id, f["resume_id"], page_candidates
-                    )
-                    dropped = len(page_candidates) - len(keep)
-                    if dropped:
-                        logger.info(
-                            "producer: user=%s filter=%s relevance dropped %d/%d",
-                            user_id, f.get("id"), dropped, len(page_candidates),
-                        )
-                    page_candidates = [c for c in page_candidates if c["id"] in keep]
-
-                for c in page_candidates:
-                    if pushed >= MAX_PUSH_PER_RUN:
-                        break
-                    await queue.put(
-                        ApplyJob(
-                            user_id=user_id,
-                            resume_id=f["resume_id"],
-                            vacancy_id=c["id"],
-                            filter_id=f.get("id"),
-                        )
-                    )
-                    pushed += 1
-
-                pages += 1
-                if pages_total is not None and page + 1 >= pages_total:
-                    break
-                if len(items) < PER_PAGE:
-                    break
-
-            if relations_blacklist:
-                await loop.run_in_executor(
-                    None, bulk_auto_blacklist, user_id, relations_blacklist
-                )
-            logger.info(
-                "producer: user=%s filter=%s pages=%d skipped already=%d blacklist=%d "
-                "excluded=%d has_test=%d relations=%d",
-                user_id,
-                f.get("id"),
-                pages,
-                skipped_already,
-                skipped_blacklist,
-                skipped_excluded,
-                skipped_has_test,
-                skipped_relations,
             )
-            skipped_has_test_total += skipped_has_test
+            pushed += 1
+            cursor += 1
     finally:
+        for s in streams:
+            await s.aclose()
         await persist_if_refreshed(user_id, client, original_access)
 
     logger.info("producer: user=%s DONE pushed=%d total queue size=%d",
                 user_id, pushed, queue.qsize())
-    return pushed, skipped_has_test_total
+    return pushed, 0

@@ -150,6 +150,43 @@ async def test_relevance_uses_cache_no_llm_call():
 
 
 @pytest.mark.asyncio
+async def test_round_robin_interleaves_filters():
+    """Two enabled filters must take turns — order is f1,f2,f1,f2,... — so a
+    busy first filter can't starve the second out of the shared budget."""
+    from app.services import vacancy_producer as vp
+    from app.worker.queue import drop_user_queue, get_user_queue
+    drop_user_queue("u1")
+
+    f1 = _filter_row(id="f1", text="A", ai_filter_enabled=False)
+    f2 = _filter_row(id="f2", text="B", ai_filter_enabled=False)
+
+    def _table(name):
+        return {"filters": _chain([f1, f2]), "applications": _chain([]),
+                "blacklist": _chain([])}[name]
+
+    def _get(path, params):
+        if params.get("text") == "A":
+            return {"items": [{"id": f"a{i}", "employer": {"id": f"ea{i}"}}
+                              for i in range(3)], "found": 3}
+        return {"items": [{"id": f"b{i}", "employer": {"id": f"eb{i}"}}
+                          for i in range(3)], "found": 3}
+
+    client = MagicMock()
+    client.access_token = "tok"
+    client.get.side_effect = _get
+
+    with patch.object(vp.service_client, "table", side_effect=_table), \
+         patch.object(vp, "load_api_client", new=AsyncMock(return_value=client)), \
+         patch.object(vp, "persist_if_refreshed", new=AsyncMock()):
+        pushed, _ = await vp.produce_jobs("u1")
+
+    assert pushed == 6
+    queue = get_user_queue("u1")
+    order = [queue.get_nowait().vacancy_id for _ in range(6)]
+    assert order == ["a0", "b0", "a1", "b1", "a2", "b2"]
+
+
+@pytest.mark.asyncio
 async def test_ai_filter_disabled_bypasses_relevance():
     from app.services import vacancy_producer as vp
     from app.worker.queue import drop_user_queue, get_user_queue
