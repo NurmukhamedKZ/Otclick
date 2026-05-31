@@ -11,7 +11,8 @@ for `.hh.ru` cover `chatik.hh.ru`). No browser. Replies are still POSTed via the
 legacy messages API — those DO land in the chatik chat (verified).
 
 Endpoints:
-  GET /chatik/api/chats      → ~20 most recent chats (no server-side paging);
+  GET /chatik/api/chats      → 20 chats per page; we walk `page` until
+                               `hasNextPage` is false to cover every active chat.
                                item.resources.NEGOTIATION_TOPIC[0] = legacy nid,
                                item.id = chatId, currentParticipantId = my id,
                                lastMessage = newest message (drives the trigger).
@@ -33,22 +34,35 @@ _HEADERS = {"X-Requested-With": "XMLHttpRequest", "Referer": "https://hh.ru/chat
 
 # --- sync helpers (run inside an executor) -----------------------------------
 
+# /chats returns 20 per page; walk pages so the agent sees every active chat,
+# not just the 20 most recent. Cap as a safety net against a runaway loop.
+_MAX_CHAT_PAGES = 15
+
+
 def _chat_items(session) -> list[dict]:
-    r = session.get(
-        f"{CHATIK}/chats",
-        params={"do_not_track_session_events": "true"},
-        headers=_HEADERS,
-        timeout=15,
-    )
-    r.raise_for_status()
-    return (r.json().get("chats") or {}).get("items", [])
+    items: list[dict] = []
+    page = 0
+    while page < _MAX_CHAT_PAGES:
+        r = session.get(
+            f"{CHATIK}/chats",
+            params={"do_not_track_session_events": "true", "page": page},
+            headers=_HEADERS,
+            timeout=15,
+        )
+        r.raise_for_status()
+        chats = r.json().get("chats") or {}
+        items.extend(chats.get("items") or [])
+        if not chats.get("hasNextPage"):
+            break
+        page += 1
+    return items
 
 
 def _chats_map(session) -> dict[str, dict]:
     """nid (NEGOTIATION_TOPIC) -> chat ref with last-message trigger info.
 
-    Not paginated server-side (returns the ~20 most recent), but active chats
-    are recent and therefore present."""
+    Walks all pages (see _chat_items) so every active chat is present, not just
+    the 20 most recent."""
     out: dict[str, dict] = {}
     for it in _chat_items(session):
         applicant_id = str(it.get("currentParticipantId") or "")

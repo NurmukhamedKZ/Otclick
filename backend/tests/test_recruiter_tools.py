@@ -25,12 +25,18 @@ def _ctx(client=None, labels=None):
 
 
 @pytest.mark.asyncio
-async def test_do_send_posts_to_hh():
+async def test_do_send_drafts_instead_of_posting():
+    # send no longer auto-posts to hh — it queues a draft (empty reason) for the
+    # user to approve on the Todo screen, and never touches the hh client.
     from app.ai import recruiter_tools as rt
+    ins, notif = _Spy(), _Spy()
     ctx = _ctx()
-    out = await rt.do_send(ctx, "Зарплата от 300к")
-    ctx.client.post.assert_called_once_with("negotiations/n9/messages", {"message": "Зарплата от 300к"})
-    assert out == "sent"
+    with patch.object(rt.recruiter, "insert_draft", new=ins), patch.object(rt, "notify", new=notif):
+        out = await rt.do_send(ctx, "Зарплата от 300к")
+    ctx.client.post.assert_not_called()
+    assert ins.calls[0] == ("u1", "n9", "m5", "Зарплата от 300к", "")
+    assert notif.calls[0][1] == "recruiter_draft"
+    assert out == "escalated"
 
 
 @pytest.mark.asyncio
@@ -56,14 +62,19 @@ async def test_do_todo_inserts_and_notifies():
 
 
 @pytest.mark.asyncio
-async def test_do_answer_button_sends_exact_label():
+async def test_do_answer_button_drafts_exact_label():
     from app.ai import recruiter_tools as rt
     # model echoed the label inside a sentence — must resolve to the verbatim
-    # label string (here 'Нет ' with its trailing space) and post it as-is.
+    # label ('Нет ' with its trailing space) and queue it as a draft as-is (no
+    # sanitize), never posting, so the bot still matches when the user sends it.
+    ins, notif = _Spy(), _Spy()
     ctx = _ctx(labels=["Да, есть", "Нет "])
-    out = await rt.do_answer_button(ctx, "Думаю, Нет")
-    ctx.client.post.assert_called_once_with("negotiations/n9/messages", {"message": "Нет "})
-    assert out == "sent"
+    with patch.object(rt.recruiter, "insert_draft", new=ins), patch.object(rt, "notify", new=notif):
+        out = await rt.do_answer_button(ctx, "Думаю, Нет")
+    ctx.client.post.assert_not_called()
+    assert ins.calls[0] == ("u1", "n9", "m5", "Нет ", "")
+    assert notif.calls[0][1] == "recruiter_draft"
+    assert out == "escalated"
 
 
 @pytest.mark.asyncio

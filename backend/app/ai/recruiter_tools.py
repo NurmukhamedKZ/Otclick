@@ -9,7 +9,6 @@ the tools are thin adapters over them.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 
 from langchain.tools import ToolRuntime, tool
@@ -53,21 +52,11 @@ def match_label(labels: list[str], text: str | None) -> str | None:
 
 # --- side-effect helpers (testable without a ToolRuntime) --------------------
 
-async def _post_message(ctx: RecruiterContext, text: str) -> None:
-    """POST a chat message to hh. Shared transport; callers own the text policy."""
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(
-        None,
-        lambda: ctx.client.post(
-            f"negotiations/{ctx.negotiation_id}/messages", {"message": text}
-        ),
-    )
-
-
 async def do_send(ctx: RecruiterContext, message: str) -> str:
-    # free-text reply to a live recruiter — sanitize markdown/em-dashes.
-    await _post_message(ctx, sanitize_ai_text(message))
-    return "sent"
+    # The agent no longer auto-sends free-text replies — it too often invents an
+    # answer and fires it off. Queue the reply as a draft for the user to review
+    # and send on the Todo screen (same path as escalate_to_human), reason empty.
+    return await do_escalate(ctx, message, "")
 
 
 async def do_answer_button(ctx: RecruiterContext, label: str) -> str:
@@ -78,8 +67,15 @@ async def do_answer_button(ctx: RecruiterContext, label: str) -> str:
     matched = match_label(ctx.quick_reply_labels or [], label)
     if matched is None:
         return f"error: '{label}' не входит в варианты {ctx.quick_reply_labels}"
-    await _post_message(ctx, matched)
-    return "sent"
+    # Like do_send: no longer auto-posts. Queue the verbatim button label as a
+    # draft for the user to approve on the Todo screen. The label is stored as-is
+    # (no sanitize) so the bot still gets an exact match when the user sends it.
+    await recruiter.insert_draft(
+        ctx.user_id, ctx.negotiation_id, ctx.message_id, matched, "",
+        question_text=ctx.question_text,
+    )
+    await notify(ctx.user_id, "recruiter_draft", {"negotiation_id": ctx.negotiation_id})
+    return "escalated"
 
 
 async def do_escalate(ctx: RecruiterContext, draft: str, reason: str) -> str:
