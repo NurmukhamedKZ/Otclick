@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.api.deps import get_current_user, require_active_plan
-from app.services import worker_control
+from app.services import filters_service, worker_control
 
 router = APIRouter(prefix="/api/worker", tags=["worker"])
 
@@ -44,6 +44,11 @@ class StatusResponse(BaseModel):
 # within its poll interval). Status is derived from the flag + DB counters.
 @router.post("/start", response_model=StartResponse)
 async def start_worker(user_id: str = Depends(require_active_plan)) -> StartResponse:
+    if not await filters_service.has_active_filter(user_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Создайте хотя бы один фильтр с привязанным резюме перед запуском.",
+        )
     await worker_control.set_enabled(user_id, True)
     return StartResponse(state="running", queued=0)
 

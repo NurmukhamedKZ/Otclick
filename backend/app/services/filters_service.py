@@ -39,6 +39,42 @@ def _check_resume_ownership(user_id: str, resume_id: str) -> None:
         )
 
 
+def _fetch_resume_for_seed(user_id: str, resume_id: str) -> dict:
+    """Owned resume row (title + professional_roles) to seed a new filter."""
+    res = (
+        service_client.table("resumes")
+        .select("id,title,professional_roles")
+        .eq("user_id", user_id)
+        .eq("id", resume_id)
+        .maybe_single()
+        .execute()
+    )
+    if not (res and res.data):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="resume_id not found for this user",
+        )
+    return res.data
+
+
+async def has_active_filter(user_id: str) -> bool:
+    """True if the user has ≥1 enabled filter with a resume bound — the
+    minimum for the worker to produce any jobs."""
+    loop = asyncio.get_running_loop()
+    def _q():
+        return (
+            service_client.table("filters")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("enabled", True)
+            .not_.is_("resume_id", "null")
+            .limit(1)
+            .execute()
+        )
+    res = await loop.run_in_executor(None, _q)
+    return bool(res.data)
+
+
 async def list_filters(user_id: str) -> list[dict]:
     loop = asyncio.get_running_loop()
     def _q():
@@ -57,7 +93,17 @@ async def create_filter(user_id: str, payload: dict) -> dict:
     loop = asyncio.get_running_loop()
     resume_id = payload.get("resume_id")
     if resume_id:
-        await loop.run_in_executor(None, _check_resume_ownership, user_id, resume_id)
+        resume = await loop.run_in_executor(
+            None, _fetch_resume_for_seed, user_id, resume_id
+        )
+        # Seed search from the resume so a bare filter narrows to the
+        # candidate's profession instead of matching every vacancy (which
+        # floods the queue with cashier/cleaner roles). Only when the client
+        # left these unset.
+        if not payload.get("text") and resume.get("title"):
+            payload["text"] = resume["title"]
+        if not payload.get("professional_role") and resume.get("professional_roles"):
+            payload["professional_role"] = resume["professional_roles"]
     row = {**payload, "user_id": user_id}
 
     def _insert():

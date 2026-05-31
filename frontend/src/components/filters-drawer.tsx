@@ -587,12 +587,15 @@ function FilterEditor({
         />
       </EditorField>
 
-      <EditorField label="ключевые слова">
+      <EditorField
+        label="ключевые слова"
+        hint="Короткий запрос = больше вакансий. Лучше 1-2 слова (название должности). Список через запятую сужает выдачу почти до нуля."
+      >
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
           onBlur={() => text !== (filter.text ?? "") && commit({ text: text || null })}
-          placeholder="python, django, fastapi"
+          placeholder="Python разработчик"
           style={inputStyle}
         />
       </EditorField>
@@ -755,7 +758,15 @@ const inputStyle: React.CSSProperties = {
   color: "var(--ink)",
 };
 
-function EditorField({ label, children }: { label: string; children: React.ReactNode }) {
+function EditorField({
+  label,
+  children,
+  hint,
+}: {
+  label: string;
+  children: React.ReactNode;
+  hint?: string;
+}) {
   return (
     <div style={{ marginBottom: 14 }}>
       <div
@@ -770,6 +781,11 @@ function EditorField({ label, children }: { label: string; children: React.React
         {label}
       </div>
       {children}
+      {hint && (
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          {hint}
+        </div>
+      )}
     </div>
   );
 }

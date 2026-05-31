@@ -21,6 +21,9 @@ def _fluent(final_data):
     chain.eq.return_value = chain
     chain.order.return_value = chain
     chain.maybe_single.return_value = chain
+    chain.not_ = chain
+    chain.is_.return_value = chain
+    chain.limit.return_value = chain
     chain.execute.return_value = SimpleNamespace(data=final_data)
     return chain
 
@@ -83,6 +86,56 @@ async def test_create_filter_no_resume_id():
     inserted = table.insert.call_args[0][0]
     assert inserted["user_id"] == "u1"
     assert inserted["text"] == "py"
+
+
+async def test_has_active_filter_true():
+    from app.services import filters_service
+
+    table = _fluent([{"id": "f1"}])
+    with patch.object(filters_service, "service_client") as sc:
+        sc.table.return_value = table
+        assert await filters_service.has_active_filter("u1") is True
+
+
+async def test_has_active_filter_false():
+    from app.services import filters_service
+
+    table = _fluent([])
+    with patch.object(filters_service, "service_client") as sc:
+        sc.table.return_value = table
+        assert await filters_service.has_active_filter("u1") is False
+
+
+async def test_create_filter_seeds_from_resume():
+    from app.services import filters_service
+
+    resume_chain = _fluent({
+        "id": "r1", "title": "Frontend developer", "professional_roles": [96],
+    })
+    insert_chain = _fluent([{"id": "f1", "resume_id": "r1"}])
+    with patch.object(filters_service, "service_client") as sc:
+        sc.table.side_effect = [resume_chain, insert_chain]
+        await filters_service.create_filter("u1", {"resume_id": "r1", "enabled": True})
+    inserted = insert_chain.insert.call_args[0][0]
+    assert inserted["text"] == "Frontend developer"
+    assert inserted["professional_role"] == [96]
+
+
+async def test_create_filter_does_not_override_client_text():
+    from app.services import filters_service
+
+    resume_chain = _fluent({
+        "id": "r1", "title": "Frontend developer", "professional_roles": [96],
+    })
+    insert_chain = _fluent([{"id": "f1", "resume_id": "r1"}])
+    with patch.object(filters_service, "service_client") as sc:
+        sc.table.side_effect = [resume_chain, insert_chain]
+        await filters_service.create_filter(
+            "u1", {"resume_id": "r1", "text": "react"}
+        )
+    inserted = insert_chain.insert.call_args[0][0]
+    assert inserted["text"] == "react"
+    assert inserted["professional_role"] == [96]
 
 
 async def test_create_filter_checks_resume_ownership_fail():
