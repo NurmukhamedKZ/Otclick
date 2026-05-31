@@ -40,8 +40,11 @@ const SCHEDULE = [
 
 type Tab = "filters" | "blacklist" | "ai";
 
-function filterTitle(f: Filter): string {
+function filterTitle(f: Filter, resumes: Resume[] = []): string {
+  if (f.name) return f.name;
   if (f.text) return f.text;
+  const resume = resumes.find((r) => r.id === f.resume_id);
+  if (resume?.title) return resume.title;
   const parts: string[] = [];
   if (f.area === 40) parts.push("KZ");
   if (f.area === 113) parts.push("RU");
@@ -55,6 +58,7 @@ export default function FiltersDrawer() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [creating, setCreating] = useState(false);
+  const [newResumeId, setNewResumeId] = useState("");
 
   const { items: filters, error: filterError, create, update, remove } = useFilters();
   const { items: blacklist, error: blacklistError, add: addBl, remove: removeBl } = useBlacklist();
@@ -98,15 +102,19 @@ export default function FiltersDrawer() {
   }, [filters, selectedId]);
 
   async function handleCreate() {
-    const firstResume = resumes[0];
-    if (!firstResume) {
+    if (resumes.length === 0) {
       pushToast({ kind: "error", title: "Сначала синхронизируй резюме" });
+      return;
+    }
+    if (!newResumeId) {
+      pushToast({ kind: "error", title: "Выбери резюме для фильтра" });
       return;
     }
     setCreating(true);
     try {
-      const row = await create({ enabled: true, resume_id: firstResume.id });
+      const row = await create({ enabled: true, resume_id: newResumeId });
       setSelectedId(row.id);
+      setNewResumeId("");
       pushToast({ kind: "success", title: "фильтр создан" });
     } catch (e) {
       pushToast({ kind: "error", title: e instanceof Error ? e.message : "create failed" });
@@ -228,8 +236,8 @@ export default function FiltersDrawer() {
                     cursor: "pointer",
                     padding: "14px 16px",
                     borderRadius: 14,
-                    background: selectedId === f.id ? "var(--ink)" : "var(--surface)",
-                    color: selectedId === f.id ? "#F5F1E6" : "var(--ink)",
+                    background: "var(--surface)",
+                    color: "var(--ink)",
                     display: "flex",
                     alignItems: "center",
                     gap: 14,
@@ -261,12 +269,12 @@ export default function FiltersDrawer() {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      «{filterTitle(f)}»
+                      «{filterTitle(f, resumes)}»
                     </div>
                     <div
                       style={{
                         fontSize: 12,
-                        color: selectedId === f.id ? "#ffffff70" : "var(--muted)",
+                        color: "var(--muted)",
                         marginTop: 2,
                       }}
                     >
@@ -285,28 +293,55 @@ export default function FiltersDrawer() {
                   </div>
                 </div>
               ))}
-              <button
-                type="button"
-                onClick={handleCreate}
-                disabled={creating}
+              <div
                 style={{
                   border: "1.5px dashed var(--muted-2)",
-                  background: "transparent",
                   borderRadius: 14,
                   padding: 14,
-                  color: "var(--muted)",
-                  fontWeight: 600,
-                  fontSize: 13,
-                  cursor: "pointer",
                   display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
                   gap: 8,
-                  fontFamily: "inherit",
+                  alignItems: "center",
+                  flexWrap: "wrap",
                 }}
               >
-                <IPlus size={14} /> {creating ? "создаём…" : "новый фильтр"}
-              </button>
+                <select
+                  value={newResumeId}
+                  onChange={(e) => setNewResumeId(e.target.value)}
+                  disabled={resumes.length === 0}
+                  style={{ ...inputStyle, flex: "1 1 180px", width: "auto" }}
+                >
+                  <option value="">
+                    {resumes.length === 0 ? "— нет резюме —" : "— выбери резюме —"}
+                  </option>
+                  {resumes.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.title ?? r.hh_resume_id}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleCreate}
+                  disabled={creating || !newResumeId}
+                  style={{
+                    border: "none",
+                    background: newResumeId ? "var(--ink)" : "var(--bg-deep)",
+                    borderRadius: 12,
+                    padding: "10px 16px",
+                    color: newResumeId ? "#F5F1E6" : "var(--muted)",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    cursor: newResumeId ? "pointer" : "not-allowed",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontFamily: "inherit",
+                    flexShrink: 0,
+                  }}
+                >
+                  <IPlus size={14} /> {creating ? "создаём…" : "новый фильтр"}
+                </button>
+              </div>
             </div>
 
             {selected && (
@@ -502,6 +537,7 @@ function FilterEditor({
   onUpdate: (patch: Partial<FilterCreate>) => Promise<unknown>;
   onDelete: () => Promise<void>;
 }) {
+  const [name, setName] = useState(filter.name ?? "");
   const [text, setText] = useState(filter.text ?? "");
   const [salaryMin, setSalaryMin] = useState(filter.salary_min ? String(filter.salary_min) : "");
   const [area, setArea] = useState(filter.area ? String(filter.area) : "");
@@ -531,7 +567,7 @@ function FilterEditor({
         }}
       >
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>«{filterTitle(filter)}»</div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>«{filterTitle(filter, resumes)}»</div>
           <div style={{ fontSize: 12, color: "var(--muted)" }}>
             редактировать параметры поиска
           </div>
@@ -540,6 +576,16 @@ function FilterEditor({
           удалить
         </Btn>
       </div>
+
+      <EditorField label="название фильтра">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={() => name !== (filter.name ?? "") && commit({ name: name.trim() || null })}
+          placeholder="напр. Python-разработчик, Москва"
+          style={inputStyle}
+        />
+      </EditorField>
 
       <EditorField label="ключевые слова">
         <input

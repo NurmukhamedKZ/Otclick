@@ -11,6 +11,7 @@ export type ResumesList = { items: Resume[] };
 export type Filter = {
   id: string;
   resume_id: string | null;
+  name: string | null;
   text: string | null;
   area: number | null;
   salary_min: number | null;
@@ -26,6 +27,7 @@ export type Filter = {
 
 export type FilterCreate = {
   resume_id?: string | null;
+  name?: string | null;
   text?: string | null;
   area?: number | null;
   salary_min?: number | null;

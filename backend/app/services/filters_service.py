@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 PREVIEW_PER_PAGE = 20
 
 _FILTER_COLUMNS = (
-    "id,user_id,resume_id,text,area,salary_min,experience,"
+    "id,user_id,resume_id,name,text,area,salary_min,experience,"
     "schedule,employment,professional_role,excluded_regex,enabled,"
     "ai_filter_enabled,created_at"
 )
