@@ -380,6 +380,7 @@ Here are the priority tasks and future plans. Want to help? Pick one up!
 - [ ] **Fix Form Filling** — Debug and stabilize the vacancy form-filling pipeline
 - [ ] **Google, MS Teams, Yandex forms autofilling** — Extend autofill support beyond hh.ru built-in tests to external Google Forms, Microsoft Forms, and Yandex Forms used by employers
 - [ ] **Fix AI agent session persistence** — Resolve bug where AI agent and autofilling stop working the next day (token/session expiry issue)
+- [ ] **Unified Docker setup** — Single `docker compose` file that runs backend, frontend, and database together for one-command deployment
 
 ### 📋 Future
 - [ ] **Multi-language support** — Internationalization (i18n) for the dashboard
