@@ -42,7 +42,6 @@ def _patches(rp, *, recent, messages, cursor=None):
 async def _run(rp, agent, patches):
     import contextlib
     with contextlib.ExitStack() as stack:
-        objs = {}
         for p in patches:
             stack.enter_context(p)
         await rp.poll_recruiter_chats("u1", agent)
@@ -107,7 +106,8 @@ async def test_poll_skips_rejected_negotiation_state():
     from app.worker import recruiter_poll as rp
     recent = [_ref(last_id="m5", last_participant_id="emp")]
     fetch = AsyncMock()
-    agent = MagicMock(); agent.answer_recruiter = AsyncMock()
+    agent = MagicMock()
+    agent.answer_recruiter = AsyncMock()
     agent.answer_recruiter_choice = AsyncMock()
     p = _patches(rp, recent=recent, messages=[], cursor="old")
     p[3] = patch.object(rp.chatik, "chat_messages", new=fetch)  # spy
@@ -126,7 +126,8 @@ async def test_poll_skips_when_last_message_is_mine():
     from app.worker import recruiter_poll as rp
     recent = [_ref(last_participant_id="me")]  # == applicant_id
     fetch = AsyncMock()
-    agent = MagicMock(); agent.answer_recruiter = AsyncMock()
+    agent = MagicMock()
+    agent.answer_recruiter = AsyncMock()
     p = _patches(rp, recent=recent, messages=[])
     p[3] = patch.object(rp.chatik, "chat_messages", new=fetch)  # spy
     await _run(rp, agent, p)
@@ -139,7 +140,8 @@ async def test_poll_skips_already_handled():
     from app.worker import recruiter_poll as rp
     recent = [_ref(last_id="m5")]
     fetch = AsyncMock()
-    agent = MagicMock(); agent.answer_recruiter = AsyncMock()
+    agent = MagicMock()
+    agent.answer_recruiter = AsyncMock()
     p = _patches(rp, recent=recent, messages=[], cursor="m5")  # cursor == last
     p[3] = patch.object(rp.chatik, "chat_messages", new=fetch)
     await _run(rp, agent, p)

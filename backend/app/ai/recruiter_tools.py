@@ -37,16 +37,16 @@ def match_label(labels: list[str], text: str | None) -> str | None:
     trailing space). None when it does not map to a single option."""
     t = (text or "").strip().strip('"').strip()
     tl = t.lower()
-    for l in labels:  # exact (preferred)
-        if t == l:
-            return l
-    for l in labels:  # equal ignoring label's surrounding whitespace / case
-        if tl == l.strip().lower():
-            return l
-    for l in labels:  # model echoed the label inside a sentence
-        ls = l.strip().lower()
+    for label in labels:  # exact (preferred)
+        if t == label:
+            return label
+    for label in labels:  # equal ignoring label's surrounding whitespace / case
+        if tl == label.strip().lower():
+            return label
+    for label in labels:  # model echoed the label inside a sentence
+        ls = label.strip().lower()
         if ls and (ls in tl or tl in ls):
-            return l
+            return label
     return None
 
 
