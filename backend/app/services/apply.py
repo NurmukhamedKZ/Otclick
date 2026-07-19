@@ -338,6 +338,7 @@ async def apply_one(
                 None, lambda: client.post("/negotiations", params)
             )
         except hh_errors.CaptchaRequired as ex:
+            captcha_url = ex.captcha_url
             await loop.run_in_executor(
                 None,
                 lambda: _record_application(
@@ -346,12 +347,12 @@ async def apply_one(
                     vacancy_id=vacancy_id,
                     status="captcha",
                     cover_letter=cover_letter or None,
-                    error=ex.captcha_url,
+                    error=captcha_url,
                     employer_id=employer_id,
                 ),
             )
             try:
-                await captcha_service.create_request(user_id, ex.captcha_url)
+                await captcha_service.create_request(user_id, captcha_url)
             except Exception:
                 logger.exception("apply: failed to create captcha_request")
             return "captcha"
@@ -359,7 +360,8 @@ async def apply_one(
             logger.info("user %s: hh LimitExceeded on vacancy %s", user_id, vacancy_id)
             return "limit_day"
         except hh_errors.Forbidden as ex:
-            msg = str(ex).lower()
+            ex_str = str(ex)
+            msg = ex_str.lower()
             if any(m in msg for m in _FORM_REQUIRED_MARKERS):
                 logger.info(
                     "apply: user=%s vacancy=%s form_required by hh Forbidden marker",
@@ -373,7 +375,7 @@ async def apply_one(
                         vacancy_id=vacancy_id,
                         status="form_required",
                         cover_letter=cover_letter or None,
-                        error=f"form_required: {ex}",
+                        error=f"form_required: {ex_str}",
                         employer_id=employer_id,
                     ),
                 )
@@ -395,6 +397,8 @@ async def apply_one(
             await mark_invalid(user_id, f"Forbidden: {ex}")
             return "token_dead"
         except hh_errors.ClientError as ex:
+            ex_str = str(ex)
+            ex_type = type(ex).__name__
             if _is_already_applied_error(ex):
                 await loop.run_in_executor(
                     None, _auto_blacklist, user_id, employer_id
@@ -407,7 +411,7 @@ async def apply_one(
                         vacancy_id=vacancy_id,
                         status="skipped",
                         cover_letter=cover_letter or None,
-                        error=f"already_applied: {ex}",
+                        error=f"already_applied: {ex_str}",
                         employer_id=employer_id,
                     ),
                 )
@@ -415,7 +419,7 @@ async def apply_one(
             if _match_markers(ex, _RESUME_GONE_MARKERS):
                 logger.warning(
                     "user %s: resume %s gone on hh (%s) — disabling its filters",
-                    user_id, resume_uuid, type(ex).__name__,
+                    user_id, resume_uuid, ex_type,
                 )
                 await loop.run_in_executor(
                     None, _disable_filters_for_resume, user_id, resume_uuid
@@ -429,7 +433,7 @@ async def apply_one(
                     vacancy_id=vacancy_id,
                     status="failed",
                     cover_letter=cover_letter or None,
-                    error=f"{type(ex).__name__}: {ex}",
+                    error=f"{ex_type}: {ex_str}",
                     employer_id=employer_id,
                 ),
             )

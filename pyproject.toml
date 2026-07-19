@@ -23,4 +23,16 @@ dependencies = [
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
+    "ruff>=0.15.0",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint.per-file-ignores]
+# `load_dotenv()` must run before app imports read settings; tests must set
+# env vars before importing app modules (see CLAUDE.md).
+"backend/app/main.py" = ["E402"]
+"backend/worker_main.py" = ["E402"]
+"backend/tests/test_*.py" = ["E402"]
