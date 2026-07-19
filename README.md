@@ -373,8 +373,15 @@ ruff check .
 
 ## Roadmap
 
-Here are features we're planning. Want to help? Pick one up!
+Here are the priority tasks and future plans. Want to help? Pick one up!
 
+### 🔥 Immediate Priority
+- [ ] **Update UI/UX** — Redesign the dashboard for better usability and modern look
+- [ ] **Fix Form Filling** — Debug and stabilize the vacancy form-filling pipeline
+- [ ] **Google, MS Teams, Yandex forms autofilling** — Extend autofill support beyond hh.ru built-in tests to external Google Forms, Microsoft Forms, and Yandex Forms used by employers
+- [ ] **Fix AI agent session persistence** — Resolve bug where AI agent and autofilling stop working the next day (token/session expiry issue)
+
+### 📋 Future
 - [ ] **Multi-language support** — Internationalization (i18n) for the dashboard
 - [ ] **More job platforms** — LinkedIn, Indeed, Glassdoor integrations
 - [ ] **Application analytics** — Charts and insights on your applications
