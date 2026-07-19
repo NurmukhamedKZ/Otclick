@@ -44,11 +44,11 @@ async def cloudpayments(request: Request):
         logger.warning("cp webhook bad HMAC")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="bad hmac")
 
-    fields = _parse_fields(raw, request.headers.get("content-type", ""))
+    payload = _parse_fields(raw, request.headers.get("content-type", ""))
 
     loop = asyncio.get_running_loop()
     try:
-        await loop.run_in_executor(None, billing_service.process_payment, fields)
+        await loop.run_in_executor(None, billing_service.process_payment, payload)
     except Exception:  # noqa: BLE001 — never 500 to CP, it would retry forever
         logger.exception("cp webhook processing failed")
         return {"code": 13}  # CP: retry later
