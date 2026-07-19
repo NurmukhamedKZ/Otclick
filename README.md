@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/NurmukhamedKZ/Otclick/main/docs/assets/banner.svg" alt="Otclick" width="600"/>
+  <img src="https://raw.githubusercontent.com/NurmukhamedKZ/Otclick/main/docs/assets/banner.svg" alt="Otclick" width="100%"/>
 </p>
 
 <h1 align="center">Otclick 🤖</h1>
