@@ -133,7 +133,7 @@ async def _process_chat(user_id: str, agent, client, ref: dict, states: dict[str
     mid = target["id"]
     if target["buttons"]:
         # Robot-recruiter quick-reply: the agent must pick an exact button label
-        # (free text loops) via answer_with_button, or escalate.
+        # (free text loops) via answer_recruiter_question, or escalate.
         await agent.answer_recruiter_choice(
             nid, mid, _history(msgs), client, target["text"], target["buttons"]
         )

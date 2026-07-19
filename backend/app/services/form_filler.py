@@ -129,7 +129,6 @@ async def load_resume(user_id: str, resume_row_id: str | None = None) -> dict:
 # --- vacancy test solving (web endpoint) -------------------------------------
 
 _TESTS_MARKER = ',"vacancyTests":'
-_COUNTERS_MARKER = ',"counters":'
 
 
 def _strip_tags(s: str | None) -> str:
@@ -204,13 +203,39 @@ def _resume_summary(resume: dict) -> str:
     return "\n".join(parts)
 
 
+def _find_balanced_object(text: str, obj_start: int) -> str:
+    """Return the JSON object substring starting at text[obj_start] == '{'."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for i in range(obj_start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[obj_start:i + 1]
+    raise ValueError("unbalanced vacancyTests object in page")
+
+
 def _parse_tests(page_html: str, vacancy_id: str) -> dict:
     """Pull the test definition for vacancy_id out of the page's inline JSON."""
-    start = page_html.find(_TESTS_MARKER)
-    end = page_html.find(_COUNTERS_MARKER, start)
-    if start == -1 or end == -1:
+    marker_pos = page_html.find(_TESTS_MARKER)
+    if marker_pos == -1:
         raise ValueError("vacancyTests block not found in page")
-    blob = page_html[start + len(_TESTS_MARKER):end]
+    obj_start = marker_pos + len(_TESTS_MARKER)
+    blob = html.unescape(_find_balanced_object(page_html, obj_start))
     tests_data = json.loads(blob, strict=False)
     try:
         return tests_data[str(vacancy_id)]
@@ -411,8 +436,16 @@ async def prepare_form_answers(
             None, _solve, session, vacancy_id, chat, resume_ctx
         )
     except Exception:
-        logger.exception("fill: solve failed for vacancy=%s", vacancy_id)
-        return "form_required", []
+        logger.warning(
+            "fill: solve failed for vacancy=%s, retrying once", vacancy_id, exc_info=True
+        )
+        try:
+            answers = await loop.run_in_executor(
+                None, _solve, session, vacancy_id, chat, resume_ctx
+            )
+        except Exception:
+            logger.exception("fill: solve failed for vacancy=%s (retry)", vacancy_id)
+            return "form_required", []
 
     logger.info(
         "fill: answers prepared (awaiting approval) vacancy=%s n=%d",

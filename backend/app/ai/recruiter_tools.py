@@ -3,7 +3,7 @@
 Tools perform their own side effects (hh POST / DB write). Per-chat data is
 injected via ToolRuntime[RecruiterContext] at agent runtime and is hidden from
 the model. ToolRuntime cannot be built by hand, so the side-effect logic lives
-in plain helpers (do_send / do_escalate / do_todo) that take a RecruiterContext;
+in plain helpers (do_answer / do_escalate / do_todo) that take a RecruiterContext;
 the tools are thin adapters over them.
 """
 
@@ -52,30 +52,26 @@ def match_label(labels: list[str], text: str | None) -> str | None:
 
 # --- side-effect helpers (testable without a ToolRuntime) --------------------
 
-async def do_send(ctx: RecruiterContext, message: str) -> str:
-    # The agent no longer auto-sends free-text replies — it too often invents an
-    # answer and fires it off. Queue the reply as a draft for the user to review
-    # and send on the Todo screen (same path as escalate_to_human), reason empty.
+async def do_answer(ctx: RecruiterContext, message: str) -> str:
+    """Answer the recruiter's question — always queued as a draft for the user
+    to review/send (never auto-posted). Two modes, picked by whether the
+    current message carries robot quick-reply buttons:
+
+    - buttons present (ctx.quick_reply_labels): the bot accepts ONLY a verbatim
+      label match (else it loops), so `message` is matched against the allowed
+      set and stored as-is (no sanitize — would break e.g. a trailing space).
+    - no buttons: free-text answer, sanitized before storing."""
+    if ctx.quick_reply_labels:
+        matched = match_label(ctx.quick_reply_labels, message)
+        if matched is None:
+            return f"error: '{message}' не входит в варианты {ctx.quick_reply_labels}"
+        await recruiter.insert_draft(
+            ctx.user_id, ctx.negotiation_id, ctx.message_id, matched, "",
+            question_text=ctx.question_text,
+        )
+        await notify(ctx.user_id, "recruiter_draft", {"negotiation_id": ctx.negotiation_id})
+        return "escalated"
     return await do_escalate(ctx, message, "")
-
-
-async def do_answer_button(ctx: RecruiterContext, label: str) -> str:
-    """Answer a robot-recruiter quick-reply. Unlike do_send, the text MUST be
-    one of the bot's button labels (the bot loops on anything else), so it is
-    validated against the allowed set and sent verbatim — no sanitize, which
-    would e.g. strip a label's trailing space and break the match."""
-    matched = match_label(ctx.quick_reply_labels or [], label)
-    if matched is None:
-        return f"error: '{label}' не входит в варианты {ctx.quick_reply_labels}"
-    # Like do_send: no longer auto-posts. Queue the verbatim button label as a
-    # draft for the user to approve on the Todo screen. The label is stored as-is
-    # (no sanitize) so the bot still gets an exact match when the user sends it.
-    await recruiter.insert_draft(
-        ctx.user_id, ctx.negotiation_id, ctx.message_id, matched, "",
-        question_text=ctx.question_text,
-    )
-    await notify(ctx.user_id, "recruiter_draft", {"negotiation_id": ctx.negotiation_id})
-    return "escalated"
 
 
 async def do_escalate(ctx: RecruiterContext, draft: str, reason: str) -> str:
@@ -97,35 +93,46 @@ async def do_todo(ctx: RecruiterContext, title: str, detail: str, link: str | No
 # --- tools (thin adapters; runtime injected by create_agent) -----------------
 
 @tool(return_direct=True)
-async def send_message_recruiter(message: str, runtime: ToolRuntime[RecruiterContext]) -> str:
-    """Отправить готовый ответ рекрутёру в чат hh.ru от имени кандидата.
+async def answer_recruiter_question(message: str, runtime: ToolRuntime[RecruiterContext]) -> str:
+    """Ответить на вопрос рекрутёра (текстом или кнопкой) — черновик уходит
+    пользователю на проверку, ничего не отправляется в hh автоматически.
 
     КОГДА ИСПОЛЬЗОВАТЬ:
-    - Вопрос закрытый, ответ ЕСТЬ в резюме кандидата.
-    - Примеры: зарплатные ожидания, годы опыта с технологией, город,
-      готовность к удалёнке/релокации, владение языком.
+    - Вопрос закрытый, ответ ЕСТЬ в резюме кандидата (зарплата, опыт с
+      технологией, город, удалёнка/релокация, владение языком).
+    - К последнему сообщению приложены кнопки-варианты (список дан в задании) -
+      выбери ОДИН правдивый по резюме, message = его ДОСЛОВНЫЙ текст.
 
     КОГДА НЕ ИСПОЛЬЗОВАТЬ:
     - Назначение времени собеседования → escalate_to_human.
     - Запрос данных, которых нет в резюме → escalate_to_human.
+    - Есть кнопки, но ни одна не подходит / неоднозначно → escalate_to_human
+      (НЕ угадывай).
     - Просьба заполнить форму / написать в Telegram / позвонить → make_todo.
     - Отказ или "резюме в обработке" → не вызывай инструменты вообще.
 
     PARAMETERS:
-    - message (str, required): текст ответа на русском (или языке рекрутёра).
-      Формат: plain text, 1-2 коротких предложения, БЕЗ markdown (*, _, **),
-      БЕЗ длинных тире (—), БЕЗ эмодзи, БЕЗ приветствий "Уважаемые господа".
-      Длина: 5-200 символов. Не пустая строка.
-      Пример good: "250 000-300 000 руб на руки, готов обсудить."
+    - message (str, required): текст ответа на русском (или языке рекрутёра),
+      либо ДОСЛОВНЫЙ текст выбранной кнопки (если кнопки есть).
+      Формат для текстового ответа: plain text, 1-2 коротких предложения,
+      БЕЗ markdown (*, _, **), БЕЗ длинных тире (—), БЕЗ эмодзи, БЕЗ приветствий
+      "Уважаемые господа". Длина: 5-200 символов. Не пустая строка.
+      Формат для кнопки: точный текст варианта, включая регистр и пробелы,
+      без перефразирования.
+      Пример good (текст): "250 000-300 000 руб на руки, готов обсудить."
+      Пример good (кнопка): варианты ['Да, есть', 'Нет '] → message="Да, есть".
       Пример bad: "**Здравствуйте!** Мой опыт — 5 лет..."
 
-    RETURNS: "sent" при успешной отправке.
+    RETURNS: "escalated" при успешном сохранении черновика; строку "error: ..."
+    если кнопки есть, а message не совпал ни с одним вариантом (тогда выбери
+    корректный вариант или используй escalate_to_human).
 
     EDGE CASES:
-    - Текст автоматически санитизируется (убираются markdown и тире).
+    - Свободный текст автоматически санитизируется; текст кнопки — нет (нужен
+      точный матч).
     - Вызывается РОВНО ОДИН раз за сообщение рекрутёра. Не дублировать.
     """
-    return await do_send(runtime.context, message)
+    return await do_answer(runtime.context, message)
 
 
 @tool(return_direct=True)
@@ -139,11 +146,11 @@ async def escalate_to_human(draft: str, reason: str, runtime: ToolRuntime[Recrui
     - Любая неоднозначность, где автоответ может навредить.
     - Вопрос робота-рекрутёра с кнопками, но ты НЕ можешь уверенно выбрать
       вариант (нет данных в резюме / неоднозначно) → эскалируй, пусть человек
-      выберет. НЕ угадывай через answer_with_button.
+      выберет. НЕ угадывай через answer_recruiter_question.
 
     КОГДА НЕ ИСПОЛЬЗОВАТЬ:
-    - Ответ есть в резюме → send_message_recruiter.
-    - Вопрос робота с кнопками И вариант понятен по резюме → answer_with_button.
+    - Ответ есть в резюме, или вопрос с кнопками и вариант понятен по резюме
+      → answer_recruiter_question.
     - Действие вне hh (форма/Telegram/звонок) → make_todo.
 
     PARAMETERS:
@@ -182,7 +189,7 @@ async def make_todo(title: str, detail: str, link: str | None,
     - Просит отправить файлы/портфолио на e-mail.
 
     КОГДА НЕ ИСПОЛЬЗОВАТЬ:
-    - Ответить можно прямо в hh-чате → send_message_recruiter.
+    - Ответить можно прямо в hh-чате → answer_recruiter_question.
     - Нужен ручной ответ человека → escalate_to_human.
 
     PARAMETERS:
@@ -208,32 +215,6 @@ async def make_todo(title: str, detail: str, link: str | None,
     return await do_todo(runtime.context, title, detail, link)
 
 
-@tool(return_direct=True)
-async def answer_with_button(label: str, runtime: ToolRuntime[RecruiterContext]) -> str:
-    """Ответить роботу-рекрутёру, выбрав ОДИН готовый вариант ответа (кнопку).
-
-    КОГДА ИСПОЛЬЗОВАТЬ:
-    - К последнему сообщению робота приложены кнопки-варианты (их список дан
-      в задании). Робот примет ответ ТОЛЬКО если текст точно совпадает с
-      вариантом — поэтому обычный send_message_recruiter тут НЕ работает
-      (робот зациклится и переспросит).
-    - Выбирай правдиво на основе резюме кандидата.
-
-    КОГДА НЕ ИСПОЛЬЗОВАТЬ:
-    - Кнопок нет (свободный вопрос) → send_message_recruiter.
-    - Ни один вариант не подходит / неоднозначно → escalate_to_human.
-
-    PARAMETERS:
-    - label (str, required): ТОЧНЫЙ текст одного из предложенных вариантов,
-      скопированный дословно (включая регистр и пробелы). НЕ перефразируй.
-      Пример: варианты ['Да, есть', 'Нет '] → label="Да, есть".
-
-    RETURNS: "sent" при успехе; строку "error: ..." если label не совпал с
-    вариантами (тогда выбери корректный вариант или escalate_to_human).
-    """
-    return await do_answer_button(runtime.context, label)
-
-
 RECRUITER_TOOLS = [
-    send_message_recruiter, escalate_to_human, make_todo, answer_with_button,
+    answer_recruiter_question, escalate_to_human, make_todo,
 ]

@@ -173,9 +173,9 @@ class HHAgent:
 
         Same agent/tools/memory as answer_recruiter — but the chatik buttons are
         injected into the context (`quick_reply_labels`) plus a directive turn,
-        so the agent picks the `answer_with_button` tool (exact label, no loop),
-        or `escalate_to_human` when no option fits. hh's bot accepts only a
-        verbatim label, so free-text replies must never be used here."""
+        so the agent picks `answer_recruiter_question` with an exact label (no
+        loop), or `escalate_to_human` when no option fits. hh's bot accepts only
+        a verbatim label, so free-text replies must never be used here."""
         if not settings.OPENAI_API_KEY:
             logger.info("recruiter: no OPENAI_API_KEY — skipping bot chat %s", negotiation_id)
             return
@@ -189,9 +189,9 @@ class HHAgent:
         directive = (
             "Последнее сообщение - вопрос робота-рекрутёра с кнопками-вариантами. "
             f"Варианты ответа: {labels}. Выбери ОДИН правдивый по резюме и вызови "
-            "answer_with_button с его ТОЧНЫМ текстом. Если ни один не подходит или "
-            "неоднозначно - escalate_to_human, где reason = причина (почему не "
-            'выбрал) И перечисление этих вариантов через " / ".'
+            "answer_recruiter_question с его ТОЧНЫМ текстом. Если ни один не "
+            "подходит или неоднозначно - escalate_to_human, где reason = причина "
+            '(почему не выбрал) И перечисление этих вариантов через " / ".'
         )
         await self._recruiter_agent.ainvoke(
             {"messages": history + [("user", directive)]},

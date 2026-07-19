@@ -13,7 +13,7 @@ def test_build_recruiter_prompt_embeds_resume_and_rules():
     from backend.app.ai.prompts import build_recruiter_prompt
     p = build_recruiter_prompt("Python dev, 3 года опыта")
     assert "Python dev, 3 года опыта" in p
-    assert "send_message_recruiter" in p
+    assert "answer_recruiter_question" in p
     assert "escalate_to_human" in p
     assert "make_todo" in p
     assert "Отказ" in p or "отказ" in p
@@ -65,9 +65,9 @@ async def test_answer_recruiter_choice_invokes_agent_with_labels():
     # buttons injected into the agent context...
     ctx = kwargs["context"]
     assert ctx.quick_reply_labels == labels and ctx.negotiation_id == "n9"
-    # ...and a directive turn appended so the agent picks answer_with_button
+    # ...and a directive turn appended so the agent picks answer_recruiter_question
     msgs = args[0]["messages"]
-    assert any("answer_with_button" in m[1] for m in msgs if isinstance(m, tuple))
+    assert any("answer_recruiter_question" in m[1] for m in msgs if isinstance(m, tuple))
     assert kwargs["config"]["configurable"]["thread_id"] == "n9"
 
 

@@ -100,8 +100,9 @@ def test_parse_tests_extracts_vacancy_block():
 
     page = (
         'window.state={"foo":1,"vacancyTests":'
-        '{"999":{"uidPk":"u","guid":"g","startTime":123,"required":true,"tasks":[]}}'
-        ',"counters":{"x":1}};'
+        '{"999":{"uidPk":"u","guid":"g",'
+        '"startTime":123,"required":true,"tasks":[]}}'
+        ',"otherField":{"y":2},"counters":{"x":1}};'
     )
     td = _parse_tests(page, "999")
     assert td["uidPk"] == "u"
@@ -189,7 +190,8 @@ def test_solve_collects_answers_without_submitting():
         }
     }
     page = (
-        'pre,"xsrfToken":"XT","vacancyTests":' + json.dumps(td) + ',"counters":{}'
+        'pre,"xsrfToken":"XT","vacancyTests":'
+        + json.dumps(td) + ',"counters":{}'
     )
 
     get_resp = MagicMock(status_code=200, text=page)
@@ -223,7 +225,8 @@ def test_submit_posts_approved_answers():
         }
     }
     page = (
-        'pre,"xsrfToken":"XT","vacancyTests":' + json.dumps(td) + ',"counters":{}'
+        'pre,"xsrfToken":"XT","vacancyTests":'
+        + json.dumps(td) + ',"counters":{}'
     )
     get_resp = MagicMock(status_code=200, text=page)
     post_resp = MagicMock(status_code=200)

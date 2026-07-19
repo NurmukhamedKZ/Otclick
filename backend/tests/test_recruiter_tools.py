@@ -25,14 +25,14 @@ def _ctx(client=None, labels=None):
 
 
 @pytest.mark.asyncio
-async def test_do_send_drafts_instead_of_posting():
-    # send no longer auto-posts to hh — it queues a draft (empty reason) for the
-    # user to approve on the Todo screen, and never touches the hh client.
+async def test_do_answer_drafts_instead_of_posting():
+    # answering never auto-posts to hh — it queues a draft (empty reason) for
+    # the user to approve on the Todo screen, and never touches the hh client.
     from app.ai import recruiter_tools as rt
     ins, notif = _Spy(), _Spy()
     ctx = _ctx()
     with patch.object(rt.recruiter, "insert_draft", new=ins), patch.object(rt, "notify", new=notif):
-        out = await rt.do_send(ctx, "Зарплата от 300к")
+        out = await rt.do_answer(ctx, "Зарплата от 300к")
     ctx.client.post.assert_not_called()
     assert ins.calls[0] == ("u1", "n9", "m5", "Зарплата от 300к", "")
     assert notif.calls[0][1] == "recruiter_draft"
@@ -62,7 +62,7 @@ async def test_do_todo_inserts_and_notifies():
 
 
 @pytest.mark.asyncio
-async def test_do_answer_button_drafts_exact_label():
+async def test_do_answer_drafts_exact_label_when_buttons_present():
     from app.ai import recruiter_tools as rt
     # model echoed the label inside a sentence — must resolve to the verbatim
     # label ('Нет ' with its trailing space) and queue it as a draft as-is (no
@@ -70,7 +70,7 @@ async def test_do_answer_button_drafts_exact_label():
     ins, notif = _Spy(), _Spy()
     ctx = _ctx(labels=["Да, есть", "Нет "])
     with patch.object(rt.recruiter, "insert_draft", new=ins), patch.object(rt, "notify", new=notif):
-        out = await rt.do_answer_button(ctx, "Думаю, Нет")
+        out = await rt.do_answer(ctx, "Думаю, Нет")
     ctx.client.post.assert_not_called()
     assert ins.calls[0] == ("u1", "n9", "m5", "Нет ", "")
     assert notif.calls[0][1] == "recruiter_draft"
@@ -78,10 +78,10 @@ async def test_do_answer_button_drafts_exact_label():
 
 
 @pytest.mark.asyncio
-async def test_do_answer_button_rejects_unmatched_label():
+async def test_do_answer_rejects_unmatched_label():
     from app.ai import recruiter_tools as rt
     ctx = _ctx(labels=["Да", "Нет"])
-    out = await rt.do_answer_button(ctx, "Перезвоните завтра")
+    out = await rt.do_answer(ctx, "Перезвоните завтра")
     ctx.client.post.assert_not_called()  # never send free text disguised as a label
     assert out.startswith("error:")
 
@@ -97,5 +97,5 @@ def test_recruiter_tools_list_has_all_tools():
     from app.ai.recruiter_tools import RECRUITER_TOOLS
     names = {t.name for t in RECRUITER_TOOLS}
     assert names == {
-        "send_message_recruiter", "escalate_to_human", "make_todo", "answer_with_button",
+        "answer_recruiter_question", "escalate_to_human", "make_todo",
     }
